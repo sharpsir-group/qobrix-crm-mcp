@@ -1,0 +1,56 @@
+{
+  "name": "qobrix-crm-mcp",
+  "version": "1.0.0",
+  "description": "Read-only MCP server for Qobrix CRM — 42 tools across 13 entity groups, aligned with RESO DD 2.0 canonical real-estate workflows",
+  "type": "module",
+  "bin": {
+    "qobrix-crm-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "node --env-file=.env --test test-suite/integration.test.mjs",
+    "test:scenarios": "node --env-file=.env --test test-suite/scenarios.test.mjs",
+    "test:workflows": "node --env-file=.env --test test-suite/workflows.test.mjs",
+    "test:all": "node --env-file=.env --test test-suite/integration.test.mjs test-suite/scenarios.test.mjs test-suite/workflows.test.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "qobrix",
+    "crm",
+    "real-estate",
+    "reso",
+    "reso-dd-2.0",
+    "property",
+    "listing",
+    "mls",
+    "ai",
+    "llm",
+    "cursor",
+    "anthropic"
+  ],
+  "author": "SharpSir Group <dev@sharpsir.group> (https://sharpsir.group)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sharpsir-group/qobrix-crm-mcp.git"
+  },
+  "homepage": "https://github.com/sharpsir-group/qobrix-crm-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/sharpsir-group/qobrix-crm-mcp/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
