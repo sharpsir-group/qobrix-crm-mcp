@@ -97,7 +97,7 @@ The server is organized around six RESO-aligned business processes. The LLM rece
 
 ### Tools at a Glance
 
-**49** read-only tools — CRM entities, schema discovery, **analytics** (`qobrix_count`, `qobrix_top_values`, `qobrix_top_records`, `qobrix_aggregate`), a flexible **deals** shortcut (`qobrix_deals`), and **cache** helpers (`qobrix_cache_stats`, `qobrix_cache_clear`):
+**53** read-only tools — CRM entities, schema discovery, **analytics** (`qobrix_count`, `qobrix_top_values`, `qobrix_top_records`, `qobrix_aggregate`), a flexible **deals** shortcut (`qobrix_deals`), **reporting** (`qobrix_timeseries`, `qobrix_funnel`, `qobrix_rep_scorecard`, `qobrix_stale_leads`), and **cache** helpers (`qobrix_cache_stats`, `qobrix_cache_clear`):
 
 | Entity Group | Tools | Capabilities |
 |-------------|-------|-------------|
@@ -115,8 +115,9 @@ The server is organized around six RESO-aligned business processes. The LLM rece
 | **Meetings** | 2 | List, Get |
 | **Email Messages** | 2 | List, Get |
 | **Schema / Meta** | 2 | Get Schema (field discovery), Get Field Options (enum values) |
-| **Analytics** | 4 | Counts, top-N field values, top-N records by numeric/date, and sum/avg/min/max/count aggregates (with grouping) — bypasses the Qobrix `sort` quirk on calculated/nullable fields |
+| **Analytics** | 4 | Counts, top-N field values, top-N records by numeric/date, and sum/avg/min/max/count aggregates (with single- or multi-dim grouping) — bypasses the Qobrix `sort` quirk on calculated/nullable fields |
 | **Deals** | 1 | Flexible domain shortcut over the Contracts table (sales, rentals, listings, pipeline) with kind / contract_types[] / contract_statuses[] / date_field / min_price / party filters / summary block |
+| **Reporting** | 4 | Time-series with YoY (`qobrix_timeseries`), canonical sales funnel + conversion % (`qobrix_funnel`), per-rep scorecard / agent leaderboard (`qobrix_rep_scorecard`), silent-lead detection (`qobrix_stale_leads`) |
 | **Cache** | 2 | Stats and prefix or full invalidation for fresher reads |
 
 Every tool description includes its canonical workflow role, RESO equivalent, verified `include[]` options, FK resolution guidance, and search expression examples.
@@ -172,6 +173,42 @@ remove the need for client-side scripting:
 {
   "tool": "qobrix_deals",
   "args": { "assigned_to": "CURRENT_USER", "year": 2026 }
+}
+
+// 7) Monthly 2026 closed-sale volume with prior-year YoY %.
+{
+  "tool": "qobrix_timeseries",
+  "args": {
+    "resource": "contracts",
+    "bucket": "month",
+    "metric": "sum",
+    "field": "final_selling_price_amount",
+    "year": 2026,
+    "search": "contract_type == \"cos\" and contract_status == \"agreed\"",
+    "compare_to_prior": true
+  }
+}
+
+// 8) Full 2026 sales funnel (Leads → Qualified → Viewing → Offer → Reserved → Closed).
+{ "tool": "qobrix_funnel", "args": { "year": 2026 } }
+
+// 9) 2026 agent leaderboard by volume (omit `user` for leaderboard mode).
+{ "tool": "qobrix_rep_scorecard", "args": { "year": 2026, "sort_by": "volume", "top": 10 } }
+
+// 10) Silent leads — open opportunities with no activity in 30 days.
+{ "tool": "qobrix_stale_leads", "args": { "since_days": 30 } }
+
+// 11) Multi-dim pivot: 2026 closed-sale volume by city × property_type.
+{
+  "tool": "qobrix_aggregate",
+  "args": {
+    "resource": "contracts",
+    "field": "final_selling_price_amount",
+    "op": "sum",
+    "search": "contract_type == \"cos\" and contract_status == \"agreed\" and date_of_contract >= \"2026-01-01\" and date_of_contract < \"2027-01-01\"",
+    "group_by": ["property_id", "contract_type"],
+    "top": 10
+  }
 }
 ```
 
@@ -449,6 +486,9 @@ src/
     ├── activities.ts # Activity Tracking (calls, meetings, emails)
     ├── analytics.ts  # qobrix_count, qobrix_top_values, qobrix_top_records, qobrix_aggregate
     ├── deals.ts      # qobrix_deals (flexible Contracts shortcut)
+    ├── reports.ts    # qobrix_timeseries (bucketed metric + YoY)
+    ├── pipeline.ts   # qobrix_funnel, qobrix_stale_leads
+    ├── productivity.ts # qobrix_rep_scorecard
     ├── cache.ts      # qobrix_cache_stats, qobrix_cache_clear
     └── meta.ts       # Schema Discovery tools
 test-suite/

@@ -481,16 +481,119 @@ export const AggregateSchema = z.object({
     "Aggregation: 'sum' total, 'avg' mean, 'min'/'max' extremes, 'count' rows with a non-empty value."
   ),
   search: z.string().optional().describe(SEARCH_DESCRIPTION),
-  group_by: z.string().optional().describe(
-    "Optional grouping field (e.g. 'commission_to_2' for agent leaderboard, 'property_type' " +
-    "for type-mix, 'city' for geo). Without group_by returns a single aggregate."
-  ),
+  group_by: z
+    .union([z.string(), z.array(z.string()).min(1).max(3)])
+    .optional()
+    .describe(
+      "Optional grouping. Pass a single field name (e.g. 'commission_to_2' for agent " +
+      "leaderboard, 'property_type' for type-mix, 'city' for geo) or an array of 2-3 fields " +
+      "for a multi-dimensional pivot (e.g. ['city','property_type']). Without group_by " +
+      "returns a single aggregate."
+    ),
   top: z.number().min(1).max(50).optional().describe(
     "When group_by is set, number of top buckets to return (default 10, max 50). Buckets sorted by op desc."
   ),
   resolve: z.boolean().optional().describe(
-    "If true and group_by looks like a UUID FK, resolve bucket keys to readable names. " +
-    "Defaults to true when group_by is in the always-resolve set, false otherwise."
+    "If true and group_by looks like a UUID FK (or any dim of a multi-dim group_by does), " +
+    "resolve bucket keys to readable names. Defaults to true when any dim is in the " +
+    "always-resolve set, false otherwise."
+  ),
+});
+
+// ---------------------------------------------------------------------------
+// Reporting tools (time-series, funnel, rep scorecard, stale leads)
+// ---------------------------------------------------------------------------
+
+const TIME_BUCKETS = ["day", "week", "month", "quarter", "year"] as const;
+const TIME_METRICS = ["count", "sum", "avg", "min", "max"] as const;
+
+export const TimeSeriesSchema = z.object({
+  resource: z.string().describe(RESOURCE_DESCRIPTION),
+  bucket: z.enum(TIME_BUCKETS).optional().describe(
+    "Bucket size (default 'month'). 'week' uses ISO weeks starting Monday."
+  ),
+  metric: z.enum(TIME_METRICS).optional().describe(
+    "Aggregation inside each bucket (default 'count'). Anything other than 'count' requires `field`."
+  ),
+  field: z.string().optional().describe(
+    "Numeric field aggregated by `metric` (required when metric != 'count'). " +
+    "Examples: 'final_selling_price_amount' (contracts), 'budget' (opportunities)."
+  ),
+  date_field: z.string().optional().describe(
+    "Date column to bucket on. Defaults per-resource: contracts → date_of_contract, " +
+    "opportunities → created, properties → created, calls/meetings/email-messages/tasks → created."
+  ),
+  year: z.number().int().optional().describe("Calendar year window."),
+  from: z.string().optional().describe("ISO date (YYYY-MM-DD) inclusive lower bound."),
+  to: z.string().optional().describe("ISO date (YYYY-MM-DD) exclusive upper bound."),
+  since_days: z.number().int().optional().describe(
+    "Rolling window: only rows dated within the last N days. Mutually exclusive with year/from/to."
+  ),
+  search: z.string().optional().describe(
+    "Extra raw Qobrix search expression ANDed with the date window."
+  ),
+  compare_to_prior: z.boolean().optional().describe(
+    "If true, runs the same query over the prior identical-length window and returns " +
+    "a `prior` block + YoY % diffs (when buckets line up)."
+  ),
+});
+
+export const FunnelSchema = z.object({
+  year: z.number().int().optional().describe("Calendar year window for the funnel."),
+  from: z.string().optional().describe("ISO lower bound."),
+  to: z.string().optional().describe("ISO exclusive upper bound."),
+  since_days: z.number().int().optional().describe("Rolling window in days."),
+  assigned_to: z.string().optional().describe(
+    "User UUID, or 'CURRENT_USER' to scope the funnel to one rep."
+  ),
+  agent: z.string().optional().describe(
+    "Agent UUID (commission_to_2 / Properties.agent) to scope to an external broker."
+  ),
+  stage_overrides: z.record(z.string()).optional().describe(
+    "Optional map of stage_name → raw Qobrix search expression to override the canonical " +
+    "stage definition. Valid stage names: 'leads', 'qualified', 'viewing', 'offer', " +
+    "'reserved', 'closed'."
+  ),
+});
+
+const SCORECARD_SORT = [
+  "volume",
+  "commission",
+  "deals_closed",
+  "activities",
+  "viewings",
+] as const;
+
+export const RepScorecardSchema = z.object({
+  user: z.string().optional().describe(
+    "User UUID for a single-rep card. Omit for top-N leaderboard mode. " +
+    "Accepts the special token 'CURRENT_USER'."
+  ),
+  top: z.number().min(1).max(50).optional().describe(
+    "Leaderboard size (default 10). Ignored when `user` is set."
+  ),
+  sort_by: z.enum(SCORECARD_SORT).optional().describe(
+    "Leaderboard sort axis (default 'volume'). Ignored when `user` is set."
+  ),
+  year: z.number().int().optional().describe("Calendar year window."),
+  from: z.string().optional().describe("ISO lower bound."),
+  to: z.string().optional().describe("ISO exclusive upper bound."),
+  since_days: z.number().int().optional().describe("Rolling window in days."),
+});
+
+export const StaleLeadsSchema = z.object({
+  since_days: z.number().int().min(1).optional().describe(
+    "Threshold in days (default 30). A lead is 'stale' if no Call/Meeting/Email/Task touched it " +
+    "and the opportunity itself wasn't modified within this window."
+  ),
+  statuses: z.array(z.string()).optional().describe(
+    "Opportunity statuses considered 'live' (default ['new','open'])."
+  ),
+  assigned_to: z.string().optional().describe(
+    "Scope to one rep's leads. UUID or 'CURRENT_USER'."
+  ),
+  top: z.number().min(1).max(200).optional().describe(
+    "Max stale leads to return (default 50). Sorted oldest-modified first."
   ),
 });
 

@@ -96,6 +96,18 @@ Default limit=10, max 100. Exception: Media list returns { data: [...] } without
 ## Discovering field names
 Call qobrix_get_schema with the resource name (e.g. 'Properties', 'Contacts', 'Opportunities') to discover all fields, types, and validation rules before building search expressions.
 
+## Reporting cookbook (analyst-grade questions in one call)
+
+When the user asks anything that maps to a recurring sales/management report, prefer one of these high-level tools over composing many primitive calls — they encode canonical business definitions and avoid Qobrix's sort/aggregate quirks:
+
+- **Trend / YoY / monthly volume** → **qobrix_timeseries** (bucket=day|week|month|quarter|year, metric=count|sum|avg|min|max, optional compare_to_prior=true for prior-window YoY %). Default date_field per resource (contracts→date_of_contract, everything else→created).
+- **Sales funnel + conversion %** → **qobrix_funnel**. Six canonical stages: leads → qualified → viewing → offer → reserved → closed. Scope with year/from/to/since_days, optional assigned_to (UUID or "CURRENT_USER") and agent. Use stage_overrides for tenant-specific stage definitions.
+- **Rep productivity / agent leaderboard / "my scorecard"** → **qobrix_rep_scorecard**. Omit the 'user' arg for a top-N leaderboard sorted by volume/commission/deals_closed/activities/viewings. Pass user="CURRENT_USER" for a single-rep wide row.
+- **Silent / stale leads** → **qobrix_stale_leads** (default since_days=30, statuses=["new","open"]). Builds a recent-activity set from calls/meetings/email-messages/tasks and returns open opportunities not in it whose opportunity row itself wasn't modified within the window.
+- **Multi-dimensional pivot (e.g. city × property_type)** → **qobrix_aggregate** with group_by as an array of 2-3 fields.
+
+Implementation note for stale leads: activity rows expose the linked opportunity under one of related_opportunity / related_opportunity_id / opportunity_id / opportunity (varies by tenant). The tool reads all of them defensively.
+
 ## Known quirks
 - Opportunities: avoid include=['Locations'] in list calls unless you also select the location FK in fields[].
 - Media endpoint does not support search expressions or pagination metadata.

@@ -456,14 +456,20 @@ export function registerAnalyticsTools(server: McpServer): void {
     AggregateSchema.shape,
     async ({ resource, field, op, search, group_by, top, resolve }) => {
       try {
+        const groupDims: string[] | null = group_by == null
+          ? null
+          : Array.isArray(group_by)
+            ? group_by
+            : [group_by];
+
         const scan = await paginateAll({
           resource,
           search,
-          fields: group_by ? ["id", field, group_by] : ["id", field],
+          fields: groupDims ? ["id", field, ...groupDims] : ["id", field],
           expand: false,
         });
 
-        if (!group_by) {
+        if (!groupDims) {
           const values: number[] = [];
           for (const row of scan.rows) {
             const n = toNumberOrNull(row[field]);
@@ -483,49 +489,80 @@ export function registerAnalyticsTools(server: McpServer): void {
           });
         }
 
-        // Grouped.
-        const buckets = new Map<string, { values: number[]; count: number }>();
+        // Grouped (single or multi-dim).
+        const KEY_SEP = "\u0001"; // unlikely tuple separator
+        const buckets = new Map<
+          string,
+          { keys: string[]; values: number[]; count: number }
+        >();
         for (const row of scan.rows) {
-          const groupRaw = row[group_by];
-          if (groupRaw == null || groupRaw === "") continue;
-          const key = String(groupRaw);
-          let bucket = buckets.get(key);
+          const keys: string[] = [];
+          let anyEmpty = false;
+          for (const dim of groupDims) {
+            const v = row[dim];
+            if (v == null || v === "") {
+              anyEmpty = true;
+              break;
+            }
+            keys.push(String(v));
+          }
+          if (anyEmpty) continue;
+          const tupleKey = keys.join(KEY_SEP);
+          let bucket = buckets.get(tupleKey);
           if (!bucket) {
-            bucket = { values: [], count: 0 };
-            buckets.set(key, bucket);
+            bucket = { keys, values: [], count: 0 };
+            buckets.set(tupleKey, bucket);
           }
           bucket.count++;
           const n = toNumberOrNull(row[field]);
           if (n != null) bucket.values.push(n);
         }
 
-        const bucketRows = [...buckets.entries()].map(([key, bucket]) => {
+        const isSingleDim = groupDims.length === 1;
+        const bucketRows = [...buckets.values()].map((bucket) => {
           const stats = computeStats(bucket.values, op);
-          return {
-            group_value: key,
+          const base: Record<string, unknown> = {
             n_rows: bucket.count,
             n_with_value: bucket.values.length,
             ...stats,
           };
+          if (isSingleDim) {
+            base.group_value = bucket.keys[0];
+          } else {
+            base.group_keys = bucket.keys;
+          }
+          return base;
         });
 
         const sortKey = op === "count" ? "count" : op;
         bucketRows.sort((a, b) => {
-          const av = (a as Record<string, unknown>)[sortKey] as number | null;
-          const bv = (b as Record<string, unknown>)[sortKey] as number | null;
+          const av = a[sortKey] as number | null;
+          const bv = b[sortKey] as number | null;
           return (bv ?? -Infinity) - (av ?? -Infinity);
         });
 
         const limit = top ?? 10;
         const slice = bucketRows.slice(0, limit);
 
-        const shouldResolve =
-          resolve ?? ALWAYS_RESOLVE_KEYS.has(group_by);
+        const dimsWithResolver = groupDims.filter((d) =>
+          ALWAYS_RESOLVE_KEYS.has(d)
+        );
+        const shouldResolve = resolve ?? dimsWithResolver.length > 0;
         if (shouldResolve) {
           for (const b of slice) {
-            const name = await resolveId(group_by, b.group_value);
-            if (name != null) {
-              (b as Record<string, unknown>).group_name = name;
+            const keys = isSingleDim
+              ? [b.group_value as string]
+              : (b.group_keys as string[]);
+            const names: unknown[] = [];
+            for (let i = 0; i < groupDims.length; i++) {
+              const dim = groupDims[i];
+              const raw = keys[i];
+              names.push(await resolveId(dim, raw));
+            }
+            if (isSingleDim) {
+              if (names[0] != null) b.group_name = names[0];
+            } else {
+              b.group_names = names;
             }
           }
         }
@@ -534,7 +571,7 @@ export function registerAnalyticsTools(server: McpServer): void {
           resource,
           field,
           op,
-          group_by,
+          group_by: isSingleDim ? groupDims[0] : groupDims,
           search: search ?? "(all)",
           total_matched: scan.totalMatched,
           total_scanned: scan.totalScanned,

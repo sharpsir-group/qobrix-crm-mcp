@@ -13,6 +13,9 @@ import { registerActivityTools } from "./activities.js";
 import { registerMetaTools } from "./meta.js";
 import { registerAnalyticsTools } from "./analytics.js";
 import { registerDealTools } from "./deals.js";
+import { registerReportTools } from "./reports.js";
+import { registerPipelineTools } from "./pipeline.js";
+import { registerProductivityTools } from "./productivity.js";
 import { registerCacheTools } from "./cache.js";
 
 export function formatResult(data: unknown) {
@@ -55,5 +58,8 @@ export function registerTools(server: McpServer): void {
   registerMetaTools(server);
   registerAnalyticsTools(server);
   registerDealTools(server);
+  registerReportTools(server);
+  registerPipelineTools(server);
+  registerProductivityTools(server);
   registerCacheTools(server);
 }
