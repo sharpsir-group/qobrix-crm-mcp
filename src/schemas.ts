@@ -444,6 +444,22 @@ export const TopValuesSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Cache
+// ---------------------------------------------------------------------------
+
+export const CacheStatsSchema = z.object({}).describe(
+  "No arguments. Returns hit/miss counters, memory size, in-flight requests, " +
+  "TTL, and Redis status."
+);
+
+export const CacheClearSchema = z.object({
+  prefix: z.string().optional().describe(
+    "Optional cache-key prefix to clear (e.g. 'v1:request:properties' to invalidate " +
+    "only property responses). Omit to clear the entire cache (memory + Redis)."
+  ),
+});
+
+// ---------------------------------------------------------------------------
 // Schema / Metadata
 // ---------------------------------------------------------------------------
 

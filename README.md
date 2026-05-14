@@ -1,31 +1,67 @@
 <p align="center">
   <a href="https://sharpsir.group">
-    <img src="https://raw.githubusercontent.com/sharpsir-group/.github/main/brand/logo-blue.png" alt="Sharp Sotheby's International Realty" width="400" />
+    <img src="https://raw.githubusercontent.com/sharpsir-group/.github/main/brand/logo-blue.png" alt="SharpSir Group — Sharp Sotheby's International Realty brand logo" width="400" />
   </a>
 </p>
 
-<h3 align="center">Qobrix CRM — MCP Server</h3>
+<h1 align="center">Qobrix CRM MCP Server</h1>
 
 <p align="center">
-  Read-only <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> server for <a href="https://qobrix.com/">Qobrix CRM</a>.<br />
-  42 tools across 13 entity groups, aligned with <a href="https://www.reso.org/data-dictionary/">RESO Data Dictionary 2.0</a> canonical real-estate workflows.
+  <strong>Connect Claude, Cursor, and other MCP clients to your Qobrix real-estate CRM</strong> — listings, leads, viewings, offers, contracts, and activity in one read-only <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> layer.<br />
+  <strong>46 tools</strong> (CRM entities + analytics + cache controls), <a href="https://www.reso.org/data-dictionary/">RESO Data Dictionary 2.0</a> workflows, optional <strong>Redis-backed response caching</strong>, and <strong>167 automated tests</strong>.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=nodedotjs&logoColor=white" alt="Node.js" />
-  <img src="https://img.shields.io/badge/MCP-000000?style=flat&logo=anthropic&logoColor=white" alt="MCP" />
-  <img src="https://img.shields.io/badge/Qobrix_CRM-4A90D9?style=flat&logoColor=white" alt="Qobrix" />
-  <img src="https://img.shields.io/badge/RESO_DD_2.0-1A1A2E?style=flat&logoColor=white" alt="RESO" />
-  <img src="https://img.shields.io/badge/Zod-3E67B1?style=flat&logo=zod&logoColor=white" alt="Zod" />
-  <img src="https://img.shields.io/badge/License-Apache_2.0-blue?style=flat" alt="License" />
+  <a href="https://github.com/sharpsir-group/qobrix-crm-mcp">GitHub</a>
+  ·
+  <a href="https://qobrix.com/">Qobrix CRM</a>
+  ·
+  <a href="https://modelcontextprotocol.io/">MCP specification</a>
+  ·
+  <a href="https://www.reso.org/data-dictionary/">RESO DD 2.0</a>
 </p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white" alt="Built with TypeScript" />
+  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=nodedotjs&logoColor=white" alt="Requires Node.js 20+" />
+  <img src="https://img.shields.io/badge/MCP-000000?style=flat&logo=anthropic&logoColor=white" alt="Model Context Protocol" />
+  <img src="https://img.shields.io/badge/Qobrix_CRM-4A90D9?style=flat&logoColor=white" alt="Qobrix CRM integration" />
+  <img src="https://img.shields.io/badge/RESO_DD_2.0-1A1A2E?style=flat&logoColor=white" alt="RESO Data Dictionary 2.0" />
+  <img src="https://img.shields.io/badge/Zod-3E67B1?style=flat&logo=zod&logoColor=white" alt="Zod schema validation" />
+  <a href="https://github.com/sharpsir-group/qobrix-crm-mcp/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue?style=flat" alt="Apache 2.0 license" /></a>
+</p>
+
+---
+
+## Table of contents
+
+- [What it does](#what-it-does)
+- [Who it is for](#who-it-is-for)
+- [Canonical real-estate workflows](#canonical-re-workflows)
+- [Tools at a glance](#tools-at-a-glance)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Caching](#caching)
+- [Usage with Cursor & other MCP hosts](#usage-with-cursor)
+- [Search expression syntax](#search-expression-syntax)
+- [Fetching related data](#fetching-related-data)
+- [Testing](#testing)
+- [Architecture](#architecture)
+- [How the LLM learns](#how-the-llm-learns)
+- [Technology](#technology)
+- [License](#license)
 
 ---
 
 ### What It Does
 
 An AI assistant connected to this server can browse properties, qualify leads, track showings, review offers and contracts, audit follow-up activity, and discover CRM field schemas — all through natural language. Every tool description teaches the LLM which canonical real-estate workflow it belongs to, which RESO resource it maps to, and which tools to chain next.
+
+### Who it is for
+
+- **Brokerages & developers** using [Qobrix](https://qobrix.com/) who want ChatGPT, Claude, or Cursor to answer questions grounded in live CRM data (not copy-pasted exports).
+- **Engineers** wiring **MCP** into internal tools: stdio transport, typed Zod inputs, and no write surface — safe to experiment with prompts and agents.
+- **Data & operations teams** running dashboards: use **`qobrix_count`** / **`qobrix_top_values`** for YoY-style metrics without custom scripts, and **response caching** to cut API load on repeat queries.
 
 ### Canonical RE Workflows
 
@@ -60,7 +96,7 @@ The server is organized around six RESO-aligned business processes. The LLM rece
 
 ### Tools at a Glance
 
-42 read-only tools organized by CRM entity:
+**46** read-only tools — CRM entities, schema discovery, **analytics** (`qobrix_count`, `qobrix_top_values`), and **cache** helpers (`qobrix_cache_stats`, `qobrix_cache_clear`):
 
 | Entity Group | Tools | Capabilities |
 |-------------|-------|-------------|
@@ -78,6 +114,8 @@ The server is organized around six RESO-aligned business processes. The LLM rece
 | **Meetings** | 2 | List, Get |
 | **Email Messages** | 2 | List, Get |
 | **Schema / Meta** | 2 | Get Schema (field discovery), Get Field Options (enum values) |
+| **Analytics** | 2 | Count rows and top-N field values via MCP (no custom pagination scripts) |
+| **Cache** | 2 | Stats and prefix or full invalidation for fresher reads |
 
 Every tool description includes its canonical workflow role, RESO equivalent, verified `include[]` options, FK resolution guidance, and search expression examples.
 
@@ -110,9 +148,63 @@ QOBRIX_LOCALE=en-US          # optional
 | `QOBRIX_API_KEY` | Yes | `X-Api-Key` header value |
 | `QOBRIX_LOCALE` | No | `X-Locale` header (e.g. `en-US`, `el-GR`) |
 
+### Caching
+
+All MCP tools are read-only `GET`s, so a response cache cannot corrupt CRM state. The server wraps **one chokepoint** (`QobrixClient.request()`) with a read-through cache, so every existing tool benefits without any contract change.
+
+**Design — cache-aside with single-flight coalescing:**
+
+- **Tier 1 — in-memory LRU** (always on, zero deps): per-process, TTL'd, size-capped.
+- **Tier 2 — Redis** (optional, lazy-loaded via dynamic `import()`): set `QOBRIX_REDIS_URL` to enable; the server falls back to memory-only on any Redis error.
+- **Single-flight**: when the LLM fires parallel tool calls that hit the same cold cache key (common with `qobrix_top_values`), all in-process callers share one upstream fetch.
+- **Errors are never cached** — a transient 5xx will not get stuck.
+- **TTL only**, no stale-while-revalidate in v1.
+
+**Environment variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `QOBRIX_CACHE_ENABLED` | `true` | Set to `false` to bypass the cache entirely |
+| `QOBRIX_CACHE_TTL` | `300` | TTL in seconds; CRM edits visible within this window |
+| `QOBRIX_CACHE_MAX_ENTRIES` | `5000` | LRU cap for the in-memory tier |
+| `QOBRIX_REDIS_URL` | `(empty)` | `redis://` / `rediss://` URL; empty = memory only |
+| `QOBRIX_REDIS_KEY_PREFIX` | `qobrix:` | Namespace when sharing a Redis instance |
+
+**Cache tools (exposed to the LLM):**
+
+| Tool | Use |
+|------|-----|
+| `qobrix_cache_stats` | Hits/misses/size/in-flight/Redis status — verify the cache is paying off |
+| `qobrix_cache_clear` | Invalidate all keys or by `prefix` (e.g. `v1:request:opportunities`) for instant refresh before TTL |
+
+**Recommended Redis server config** (for a dedicated cache-only Redis, per Redis docs):
+
+```conf
+maxmemory 256mb
+maxmemory-policy allkeys-lru
+maxmemory-samples 10
+```
+
+**TTL guidance** — Redis docs recommend short TTLs for frequently-changing data (60–120s) and longer for stable data (hours). 300s is a conservative default for a CRM that mixes lead pipeline (changes minutely) with property listings (changes hourly). Use `qobrix_cache_clear` when you need an instant refresh.
+
+**Trade-off / known limit:** Single-flight coalescing is **in-process only**. Multi-instance deployments behind one shared Redis can still see modest stampede on cold keys; a distributed `SETNX` lock is future work and not needed for single-user MCP clients.
+
+**Best-practices alignment:**
+
+| Best practice | Where honored |
+|---|---|
+| Cache-aside / read-through (Redis docs, MCP caching guides) | `QobrixClient.request()` wrap |
+| Canonical, versioned cache key | `cacheKey("v1", ...)` with sorted params |
+| Conservative TTL | `300s` default, env-overridable |
+| Errors not cached | Wrap stores only on resolved upstream success |
+| Single-flight stampede prevention | In-process `inflight` map |
+| `allkeys-lru` for cache-only Redis | Documented above for self-hosters |
+| Observability + manual invalidation | `qobrix_cache_stats`, `qobrix_cache_clear` |
+| Official Node.js Redis client | `redis` (node-redis), as `optionalDependencies` |
+
 ### Usage with Cursor
 
-Add to `~/.cursor/mcp.json`:
+This server speaks **stdio MCP**, the default transport for [Cursor](https://cursor.com/), Claude Desktop, and other hosts. Add to `~/.cursor/mcp.json` (or your host’s equivalent):
 
 ```json
 {
@@ -181,7 +273,7 @@ Only `include[]` values marked **Verified** in tool descriptions are guaranteed 
 
 ### Testing
 
-The project includes a comprehensive test suite (148 tests across 41 suites):
+The project includes **167 automated tests** across **47** `describe` suites (integration, multi-step scenarios, RESO workflows, and cache behavior):
 
 ```bash
 # Integration tests — individual tool mechanics
@@ -193,6 +285,9 @@ npm run test:scenarios
 # Workflow tests — canonical RE business processes (8 RESO-aligned suites)
 npm run test:workflows
 
+# Cache tests — read-through, single-flight, LRU eviction (no API needed)
+npm run test:cache
+
 # Run everything
 npm run test:all
 ```
@@ -202,6 +297,7 @@ npm run test:all
 | Integration | 55 | Every tool, pagination edge cases, include/fields mechanics |
 | Scenarios | 54 | Agent morning brief, buyer search, lead triage, FK chains, pipeline reports |
 | Workflows | 39 | Listing lifecycle, lead funnel, sales pipeline, showing, transaction, media, activity, schema |
+| Cache | 19 | Read-through cache, single-flight coalescing, LRU eviction, key canonicalization (no live API) |
 
 ---
 
@@ -210,7 +306,8 @@ npm run test:all
 ```
 src/
 ├── index.ts          # MCP server entry point + RESO workflow instructions
-├── client.ts         # QobrixClient — HTTP abstraction for /api/v2/
+├── client.ts         # QobrixClient — HTTP + read-through response cache
+├── cache.ts          # LRU memory tier, optional Redis, single-flight coalescing
 ├── types.ts          # TypeScript interfaces
 ├── schemas.ts        # Zod schemas with rich LLM-facing descriptions
 └── tools/
@@ -226,11 +323,14 @@ src/
     ├── offers.ts     # Transaction Lifecycle tools
     ├── contracts.ts  # Transaction close tools
     ├── activities.ts # Activity Tracking (calls, meetings, emails)
+    ├── analytics.ts  # qobrix_count, qobrix_top_values
+    ├── cache.ts      # qobrix_cache_stats, qobrix_cache_clear
     └── meta.ts       # Schema Discovery tools
 test-suite/
 ├── integration.test.mjs  # 55 integration tests
 ├── scenarios.test.mjs    # 54 scenario tests
-└── workflows.test.mjs    # 39 workflow tests
+├── workflows.test.mjs    # 39 workflow tests
+└── cache.test.mjs        # 19 cache unit tests
 ```
 
 ### How the LLM Learns
@@ -239,7 +339,7 @@ The server teaches the LLM at three levels:
 
 1. **Server instructions** — top-level `instructions` field in the MCP `initialize` response provides the full data model, six canonical workflows with tool recipes, search syntax, FK resolution strategies, and known quirks.
 
-2. **Tool descriptions** — each of the 42 tool descriptions includes its canonical workflow role, RESO equivalent, verified `include[]` options, FK field mappings, response shape, and search examples.
+2. **Tool descriptions** — each of the **46** tool descriptions includes its canonical workflow role, RESO equivalent, verified `include[]` options, FK field mappings, response shape, and search examples.
 
 3. **Parameter descriptions** — Zod schemas provide per-parameter help with concrete examples, valid enum values, and cross-tool references.
 
@@ -253,13 +353,14 @@ The server teaches the LLM at three levels:
 | Language | TypeScript 5.7 |
 | MCP SDK | `@modelcontextprotocol/sdk` 1.26 |
 | Validation | Zod 3.24 |
+| Optional cache | `redis` 4.x (node-redis) when `QOBRIX_REDIS_URL` is set |
 | Transport | stdio (standard MCP transport) |
 | API Auth | `X-Api-User` + `X-Api-Key` headers |
 | Testing | Node.js built-in test runner (`node:test`) |
 
 ### License
 
-[Apache License 2.0](LICENSE) — Copyright 2025 SharpSir Group
+[Apache License 2.0](LICENSE) — Copyright 2025–2026 SharpSir Group
 
 ---
 

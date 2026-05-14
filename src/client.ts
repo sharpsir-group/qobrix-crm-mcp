@@ -5,6 +5,7 @@ import type {
   ListOpts,
   GetOpts,
 } from "./types.js";
+import { getCache, cacheKey } from "./cache.js";
 
 export class QobrixClient {
   private baseUrl: string;
@@ -55,6 +56,18 @@ export class QobrixClient {
   }
 
   async request<T>(path: string, params?: Record<string, string | string[] | boolean | number | undefined>): Promise<T> {
+    const cache = getCache();
+    if (!cache.enabled) {
+      return this.fetchUpstream<T>(path, params);
+    }
+    const key = cacheKey("request", path, params);
+    return cache.fetch<T>(key, () => this.fetchUpstream<T>(path, params));
+  }
+
+  private async fetchUpstream<T>(
+    path: string,
+    params?: Record<string, string | string[] | boolean | number | undefined>
+  ): Promise<T> {
     const url = this.buildUrl(path, params);
 
     const response = await fetch(url, {

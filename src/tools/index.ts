@@ -12,6 +12,7 @@ import { registerContractTools } from "./contracts.js";
 import { registerActivityTools } from "./activities.js";
 import { registerMetaTools } from "./meta.js";
 import { registerAnalyticsTools } from "./analytics.js";
+import { registerCacheTools } from "./cache.js";
 
 export function formatResult(data: unknown) {
   return {
@@ -52,4 +53,5 @@ export function registerTools(server: McpServer): void {
   registerActivityTools(server);
   registerMetaTools(server);
   registerAnalyticsTools(server);
+  registerCacheTools(server);
 }

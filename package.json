@@ -1,7 +1,7 @@
 {
   "name": "qobrix-crm-mcp",
   "version": "1.0.0",
-  "description": "Read-only MCP server for Qobrix CRM — 42 tools across 13 entity groups, aligned with RESO DD 2.0 canonical real-estate workflows",
+  "description": "Read-only Model Context Protocol (MCP) server for Qobrix CRM: 46 tools for listings, leads, deals, RESO DD 2.0 workflows, built-in analytics (count/top-N), and optional Redis-backed response caching for Cursor, Claude, and other MCP clients.",
   "type": "module",
   "bin": {
     "qobrix-crm-mcp": "./dist/index.js"
@@ -14,7 +14,8 @@
     "test": "node --env-file=.env --test test-suite/integration.test.mjs",
     "test:scenarios": "node --env-file=.env --test test-suite/scenarios.test.mjs",
     "test:workflows": "node --env-file=.env --test test-suite/workflows.test.mjs",
-    "test:all": "node --env-file=.env --test test-suite/integration.test.mjs test-suite/scenarios.test.mjs test-suite/workflows.test.mjs"
+    "test:cache": "node --test test-suite/cache.test.mjs",
+    "test:all": "node --env-file=.env --test test-suite/integration.test.mjs test-suite/scenarios.test.mjs test-suite/workflows.test.mjs test-suite/cache.test.mjs"
   },
   "keywords": [
     "mcp",
@@ -30,7 +31,15 @@
     "ai",
     "llm",
     "cursor",
-    "anthropic"
+    "anthropic",
+    "openai",
+    "vscode",
+    "redis",
+    "property-management",
+    "brokerage",
+    "claude-desktop",
+    "lead-generation",
+    "mcp-server"
   ],
   "author": "SharpSir Group <dev@sharpsir.group> (https://sharpsir.group)",
   "license": "Apache-2.0",
@@ -45,6 +54,9 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "zod": "^3.24.0"
+  },
+  "optionalDependencies": {
+    "redis": "^4.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
