@@ -42,7 +42,8 @@
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
 - [Caching](#caching)
-- [Usage with Cursor & other MCP hosts](#usage-with-cursor)
+- [Cursor IDE setup](#cursor-ide-setup)
+- [Other MCP hosts](#other-mcp-hosts)
 - [Search expression syntax](#search-expression-syntax)
 - [Fetching related data](#fetching-related-data)
 - [Testing](#testing)
@@ -202,25 +203,93 @@ maxmemory-samples 10
 | Observability + manual invalidation | `qobrix_cache_stats`, `qobrix_cache_clear` |
 | Official Node.js Redis client | `redis` (node-redis), as `optionalDependencies` |
 
-### Usage with Cursor
+### Cursor IDE setup
 
-This server speaks **stdio MCP**, the default transport for [Cursor](https://cursor.com/), Claude Desktop, and other hosts. Add to `~/.cursor/mcp.json` (or your host’s equivalent):
+This server uses **stdio MCP** (a local `node` process). Cursor discovers servers from [project or user `mcp.json`](https://cursor.com/docs/mcp): `.cursor/mcp.json` inside the folder you opened, or `~/.cursor/mcp.json` for all workspaces.
+
+#### 1. Prerequisites
+
+- **Node.js 20+** on the machine where Cursor runs the MCP (local laptop or remote SSH host).
+- Clone this repo, install, and build (see [Quick Start](#quick-start)).
+- **`dist/index.js` must exist** (`npm run build`) before adding the MCP entry.
+
+#### 2. Credentials
+
+1. Copy the template: `cp .env.example .env`
+2. Edit `.env` and set at least `QOBRIX_API_URL`, `QOBRIX_API_USER`, and `QOBRIX_API_KEY` (see [Configuration](#configuration)).
+3. Keep `.env` out of git; it is listed in `.gitignore`.
+
+#### 3. Where to put the JSON
+
+| Location | When to use |
+|----------|----------------|
+| **`<project>/.cursor/mcp.json`** | You opened that project folder in Cursor; teammates can commit a template (without secrets) or you keep it local-only. |
+| **`~/.cursor/mcp.json`** | Same MCP on every workspace on that machine. |
+
+Merge your entry into the existing `"mcpServers"` object; do not replace the whole file if you already have other servers.
+
+#### 4. Recommended: `node --env-file` (Node 20+)
+
+Pass **absolute paths** so it works the same whether the workspace root is this repo or a parent folder (and so SSH remote paths resolve correctly).
 
 ```json
 {
   "mcpServers": {
-    "qobrix-crm": {
+    "qobrix-crm-mcp": {
       "command": "node",
-      "args": ["/path/to/qobrix-crm-mcp/dist/index.js"],
+      "args": [
+        "--env-file=/absolute/path/to/qobrix-crm-mcp/.env",
+        "/absolute/path/to/qobrix-crm-mcp/dist/index.js"
+      ],
+      "description": "Read-only Qobrix CRM MCP"
+    }
+  }
+}
+```
+
+Why this pattern:
+
+- Credentials stay in `.env`, not in JSON.
+- Node loads the file **before** your server starts, so `process.env` is populated even when the host’s `envFile` field is ignored or behaves inconsistently for stdio servers.
+
+#### 5. Alternative: inline `env`
+
+Useful if you cannot use `--env-file` (older Node). **Secrets live in `mcp.json`** — restrict file permissions and do not commit them.
+
+```json
+{
+  "mcpServers": {
+    "qobrix-crm-mcp": {
+      "command": "node",
+      "args": ["/absolute/path/to/qobrix-crm-mcp/dist/index.js"],
       "env": {
         "QOBRIX_API_URL": "https://yourcrm.qobrix.com",
-        "QOBRIX_API_USER": "...",
-        "QOBRIX_API_KEY": "..."
+        "QOBRIX_API_USER": "your-api-user-uuid",
+        "QOBRIX_API_KEY": "your-api-key",
+        "QOBRIX_LOCALE": "en-US"
       }
     }
   }
 }
 ```
+
+You can also use Cursor’s [config interpolation](https://cursor.com/docs/mcp) (for example `${env:QOBRIX_API_KEY}`) so values are injected from your OS environment instead of literals.
+
+#### 6. Optional: `envFile` in MCP JSON
+
+Cursor supports an `envFile` property for stdio servers. Some setups do not pass those variables into the child process reliably; if tools fail with “Missing required environment variables”, switch to **`--env-file`** as in step 4.
+
+#### 7. After editing `mcp.json` or `.env`
+
+1. **Reload MCP** — Command Palette → MCP restart, or reload the Cursor window.
+2. **Check logs** — View → Output → pick **“MCP”** / **“MCP Logs”** in the dropdown; fix path or Node errors there.
+3. **Tool approval** — By default Cursor asks before each tool call; you can allow auto-run for trusted tools in Cursor settings if you prefer.
+
+### Other MCP hosts
+
+**Claude Desktop** — same stdio shape: `command` + `args` to `node` and either `--env-file` or `env` in the host’s MCP config file.
+
+**CI / headless** — run `node --env-file=.env dist/index.js` with a stdio MCP client library; ensure `.env` is supplied via secrets, not committed.
 
 ---
 
