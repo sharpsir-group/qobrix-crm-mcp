@@ -27,6 +27,7 @@ export const ALWAYS_RESOLVE_KEYS: ReadonlySet<string> = new Set([
   "project",
   "developer_id",
   "campaign_id",
+  "closed_lost_reason_id",
 ]);
 
 // Mapping of FK field name -> Qobrix resource where the target lives.
@@ -55,6 +56,8 @@ const FK_RESOLVER_ROUTES: Record<string, string> = {
   modified_by: "users",
   // Properties-backed (special, richer label)
   property_id: "properties",
+  // Reference data (description-keyed)
+  closed_lost_reason_id: "lead-lost-reasons",
 };
 
 // Small per-process cache so a paginated scan that resolves the same FK
@@ -97,6 +100,7 @@ export async function resolveId(
     } else {
       label =
         (data.name as string | undefined) ??
+        (data.description as string | undefined) ??
         (data.username as string | undefined) ??
         (data.title as string | undefined) ??
         null;

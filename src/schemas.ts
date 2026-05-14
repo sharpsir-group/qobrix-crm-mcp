@@ -672,6 +672,117 @@ export const DealsSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Cohort / repeat customers
+// ---------------------------------------------------------------------------
+
+const COHORT_KINDS = ["buyers", "sellers", "leads"] as const;
+
+export const CohortSchema = z.object({
+  kind: z.enum(COHORT_KINDS).optional().describe(
+    "Which population to cohort (default 'buyers'). " +
+    "'buyers' = contacts behind closed contracts (contract.opportunity_id → opportunity.contact_name). " +
+    "'sellers' = contacts on the listing side (contract.property_id → property.seller). " +
+    "'leads' = contacts on opportunities regardless of close."
+  ),
+  min_count: z.number().int().min(2).max(100).optional().describe(
+    "Minimum deal/opportunity count per contact to include them in the cohort (default 2)."
+  ),
+  contract_types: z.array(z.string()).optional().describe(
+    "Contract types for buyers/sellers (default ['cos'])."
+  ),
+  contract_statuses: z.array(z.string()).optional().describe(
+    "Contract statuses for buyers/sellers (default ['agreed'])."
+  ),
+  year: z.number().int().optional().describe("Calendar year window."),
+  from: z.string().optional().describe("ISO inclusive lower bound."),
+  to: z.string().optional().describe("ISO exclusive upper bound."),
+  since_days: z.number().int().optional().describe("Rolling window in days."),
+  top: z.number().min(1).max(100).optional().describe(
+    "Max repeat contacts to return (default 20)."
+  ),
+});
+
+// ---------------------------------------------------------------------------
+// Win / Loss analytics
+// ---------------------------------------------------------------------------
+
+export const WinLossSchema = z.object({
+  year: z.number().int().optional().describe("Calendar year window."),
+  from: z.string().optional().describe("ISO inclusive lower bound."),
+  to: z.string().optional().describe("ISO exclusive upper bound."),
+  since_days: z.number().int().optional().describe(
+    "Rolling window in days. Window is applied to last_status_change (fallback modified)."
+  ),
+  group_by: z
+    .union([z.string(), z.array(z.string()).min(1).max(3)])
+    .optional()
+    .describe(
+      "Optional slicing dimension(s). Common values: 'source', 'enquiry_type', 'owner', " +
+      "'agent', 'closed_lost_reason_id'. Pass an array of 2-3 fields for a multi-dim pivot."
+    ),
+  assigned_to: z.string().optional().describe(
+    "Scope to one rep's opportunities (UUID or 'CURRENT_USER'). Maps to opportunities.owner."
+  ),
+  agent: z.string().optional().describe(
+    "Scope to one external broker (opportunities.agent UUID)."
+  ),
+  top: z.number().min(1).max(50).optional().describe(
+    "Max group buckets to return (default 10)."
+  ),
+  include_top_losses: z.boolean().optional().describe(
+    "When true, also returns the 10 most-recent closed_lost opportunities with " +
+    "closed_lost_details, source, last_status_change, and resolved contact_name."
+  ),
+});
+
+// ---------------------------------------------------------------------------
+// Days on market
+// ---------------------------------------------------------------------------
+
+const DOM_KINDS = ["sold", "reserved", "any_closed"] as const;
+const DOM_LISTING_FIELDS = [
+  "listing_date",
+  "website_listing_date",
+  "created",
+] as const;
+const DOM_CLOSE_FIELDS = [
+  "date_of_contract",
+  "date_of_reservation",
+] as const;
+
+export const DaysOnMarketSchema = z.object({
+  kind: z.enum(DOM_KINDS).optional().describe(
+    "Which contracts count as a 'close' (default 'sold' = contract_type=cos + contract_status=agreed). " +
+    "'reserved' = contract_status=reserved. 'any_closed' = reserved + agreed."
+  ),
+  listing_date_field: z.enum(DOM_LISTING_FIELDS).optional().describe(
+    "Anchor on the property side (default 'listing_date'). Per-row fallback to website_listing_date " +
+    "then created when the chosen field is null."
+  ),
+  close_date_field: z.enum(DOM_CLOSE_FIELDS).optional().describe(
+    "Anchor on the contract side. Default depends on kind: sold→date_of_contract, " +
+    "reserved→date_of_reservation."
+  ),
+  year: z.number().int().optional().describe("Calendar year window."),
+  from: z.string().optional().describe("ISO inclusive lower bound."),
+  to: z.string().optional().describe("ISO exclusive upper bound."),
+  since_days: z.number().int().optional().describe("Rolling window in days."),
+  group_by: z
+    .union([z.string(), z.array(z.string()).min(1).max(3)])
+    .optional()
+    .describe(
+      "Optional grouping field(s) on the property side: 'property_type', 'city', " +
+      "'commission_to_2'/'agent' (broker). Multi-dim arrays of 2-3 fields supported."
+    ),
+  top: z.number().min(1).max(50).optional().describe(
+    "Max group buckets to return (default 10)."
+  ),
+  include_outliers: z.boolean().optional().describe(
+    "When true, also returns the 5 longest-DOM and 5 shortest-DOM deals."
+  ),
+});
+
+// ---------------------------------------------------------------------------
 // Cache
 // ---------------------------------------------------------------------------
 

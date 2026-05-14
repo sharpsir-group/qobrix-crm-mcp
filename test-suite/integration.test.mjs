@@ -20,9 +20,14 @@ import {
   topRecords,
 } from "../dist/tools/analytics.js";
 import { runDeals } from "../dist/tools/deals.js";
-import { runTimeseries } from "../dist/tools/reports.js";
-import { runFunnel, runStaleLeads } from "../dist/tools/pipeline.js";
+import { runTimeseries, runDaysOnMarket } from "../dist/tools/reports.js";
+import {
+  runFunnel,
+  runStaleLeads,
+  runWinLoss,
+} from "../dist/tools/pipeline.js";
 import { runRepScorecard } from "../dist/tools/productivity.js";
+import { runCohort } from "../dist/tools/customers.js";
 
 let client;
 
@@ -748,7 +753,84 @@ describe("Reporting", () => {
   });
 });
 
-// ─── 17. Cross-cutting: Pagination edge cases ───────────────────────────────
+// ─── 17. Customers / Win-Loss / Days-on-market ──────────────────────────────
+
+describe("Customers, win-loss, days-on-market", () => {
+  it("qobrix_cohort kind='buyers' year=2026 returns structurally valid output", async () => {
+    const res = await runCohort({ kind: "buyers", year: 2026, min_count: 2, top: 5 });
+    assert.equal(res.kind, "buyers");
+    assert.equal(res.min_count, 2);
+    assert.ok(Array.isArray(res.cohort));
+    assert.ok(typeof res.unique_contacts === "number");
+    assert.ok(typeof res.repeat_contacts === "number");
+    assert.ok(res.repeat_contacts <= res.unique_contacts);
+    assert.ok(res.cohort.length <= 5);
+    for (const c of res.cohort) {
+      assert.ok(c.deal_count >= 2, "every repeat contact has deal_count >= 2");
+      assert.equal(typeof c.contact_id, "string");
+      assert.ok(Array.isArray(c.deals));
+      assert.ok(c.deals.length >= 2);
+    }
+  });
+
+  it("qobrix_win_loss year=2026 returns valid totals + grouped slice", async () => {
+    const res = await runWinLoss({ year: 2026 });
+    assert.ok(res.totals);
+    assert.equal(typeof res.totals.won, "number");
+    assert.equal(typeof res.totals.closed_lost, "number");
+    if (res.totals.win_rate_pct != null) {
+      assert.ok(
+        res.totals.win_rate_pct >= 0 && res.totals.win_rate_pct <= 100,
+        "win_rate_pct in [0,100]"
+      );
+    }
+    // Grouped variant should produce at least one bucket if there are decided opps.
+    const grouped = await runWinLoss({ year: 2026, group_by: "source", top: 5 });
+    assert.deepEqual(grouped.group_by, ["source"]);
+    assert.ok(Array.isArray(grouped.top_buckets));
+    if (grouped.totals.won + grouped.totals.closed_lost > 0) {
+      assert.ok(grouped.top_buckets.length >= 1, "at least one source bucket");
+      for (const b of grouped.top_buckets) {
+        assert.equal(typeof b.group_value, "string");
+        assert.equal(typeof b.decided, "number");
+      }
+    }
+  });
+
+  it("qobrix_days_on_market kind='sold' year=2026 returns valid stats + grouping", async () => {
+    const res = await runDaysOnMarket({ kind: "sold", year: 2026 });
+    assert.equal(res.kind, "sold");
+    assert.equal(res.close_date_field, "date_of_contract");
+    assert.equal(typeof res.n_missing_listing_date, "number");
+    assert.equal(typeof res.n_missing_property, "number");
+    assert.ok(res.overall);
+    if (res.overall.count > 0) {
+      assert.ok(
+        typeof res.overall.median_days === "number" && res.overall.median_days >= 0,
+        "median_days is a non-negative number"
+      );
+      assert.ok(res.overall.min_days <= res.overall.median_days);
+      assert.ok(res.overall.median_days <= res.overall.max_days);
+    }
+
+    const grouped = await runDaysOnMarket({
+      kind: "sold",
+      year: 2026,
+      group_by: "property_type",
+      top: 5,
+    });
+    assert.ok(Array.isArray(grouped.by_group));
+    if (grouped.overall.count > 0) {
+      assert.ok(grouped.by_group.length >= 1, "at least one property_type bucket");
+      for (const b of grouped.by_group) {
+        assert.equal(typeof b.group_value, "string");
+        assert.ok(b.stats && typeof b.stats.count === "number");
+      }
+    }
+  });
+});
+
+// ─── 18. Cross-cutting: Pagination edge cases ───────────────────────────────
 
 describe("Pagination edge cases", () => {
   it("page=1 has has_prev_page=false", async () => {

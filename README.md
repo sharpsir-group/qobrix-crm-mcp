@@ -97,7 +97,7 @@ The server is organized around six RESO-aligned business processes. The LLM rece
 
 ### Tools at a Glance
 
-**53** read-only tools — CRM entities, schema discovery, **analytics** (`qobrix_count`, `qobrix_top_values`, `qobrix_top_records`, `qobrix_aggregate`), a flexible **deals** shortcut (`qobrix_deals`), **reporting** (`qobrix_timeseries`, `qobrix_funnel`, `qobrix_rep_scorecard`, `qobrix_stale_leads`), and **cache** helpers (`qobrix_cache_stats`, `qobrix_cache_clear`):
+**56** read-only tools — CRM entities, schema discovery, **analytics** (`qobrix_count`, `qobrix_top_values`, `qobrix_top_records`, `qobrix_aggregate`), a flexible **deals** shortcut (`qobrix_deals`), **reporting** (`qobrix_timeseries`, `qobrix_funnel`, `qobrix_rep_scorecard`, `qobrix_stale_leads`, `qobrix_win_loss`, `qobrix_days_on_market`), **customer** intelligence (`qobrix_cohort`), and **cache** helpers (`qobrix_cache_stats`, `qobrix_cache_clear`):
 
 | Entity Group | Tools | Capabilities |
 |-------------|-------|-------------|
@@ -117,7 +117,8 @@ The server is organized around six RESO-aligned business processes. The LLM rece
 | **Schema / Meta** | 2 | Get Schema (field discovery), Get Field Options (enum values) |
 | **Analytics** | 4 | Counts, top-N field values, top-N records by numeric/date, and sum/avg/min/max/count aggregates (with single- or multi-dim grouping) — bypasses the Qobrix `sort` quirk on calculated/nullable fields |
 | **Deals** | 1 | Flexible domain shortcut over the Contracts table (sales, rentals, listings, pipeline) with kind / contract_types[] / contract_statuses[] / date_field / min_price / party filters / summary block |
-| **Reporting** | 4 | Time-series with YoY (`qobrix_timeseries`), canonical sales funnel + conversion % (`qobrix_funnel`), per-rep scorecard / agent leaderboard (`qobrix_rep_scorecard`), silent-lead detection (`qobrix_stale_leads`) |
+| **Reporting** | 6 | Time-series with YoY (`qobrix_timeseries`), canonical sales funnel + conversion % (`qobrix_funnel`), per-rep scorecard / agent leaderboard (`qobrix_rep_scorecard`), silent-lead detection (`qobrix_stale_leads`), win-rate analytics (`qobrix_win_loss`), days-on-market (`qobrix_days_on_market`) |
+| **Customers** | 1 | Repeat-buyer / seller / lead cohorts (`qobrix_cohort`) — find contacts that appear on multiple closed deals or opportunities |
 | **Cache** | 2 | Stats and prefix or full invalidation for fresher reads |
 
 Every tool description includes its canonical workflow role, RESO equivalent, verified `include[]` options, FK resolution guidance, and search expression examples.
@@ -209,6 +210,21 @@ remove the need for client-side scripting:
     "group_by": ["property_id", "contract_type"],
     "top": 10
   }
+}
+
+// 12) Repeat buyers — contacts behind 2+ closed sales in 2026.
+{ "tool": "qobrix_cohort", "args": { "kind": "buyers", "year": 2026, "min_count": 2 } }
+
+// 13) Win-rate by lead source in 2026, with top loss reasons resolved.
+{
+  "tool": "qobrix_win_loss",
+  "args": { "year": 2026, "group_by": "source", "include_top_losses": true }
+}
+
+// 14) 2026 days-on-market by property type, with longest/shortest outliers.
+{
+  "tool": "qobrix_days_on_market",
+  "args": { "kind": "sold", "year": 2026, "group_by": "property_type", "include_outliers": true }
 }
 ```
 
@@ -486,9 +502,10 @@ src/
     ├── activities.ts # Activity Tracking (calls, meetings, emails)
     ├── analytics.ts  # qobrix_count, qobrix_top_values, qobrix_top_records, qobrix_aggregate
     ├── deals.ts      # qobrix_deals (flexible Contracts shortcut)
-    ├── reports.ts    # qobrix_timeseries (bucketed metric + YoY)
-    ├── pipeline.ts   # qobrix_funnel, qobrix_stale_leads
+    ├── reports.ts    # qobrix_timeseries (bucketed metric + YoY), qobrix_days_on_market
+    ├── pipeline.ts   # qobrix_funnel, qobrix_stale_leads, qobrix_win_loss
     ├── productivity.ts # qobrix_rep_scorecard
+    ├── customers.ts  # qobrix_cohort (repeat buyers/sellers/leads)
     ├── cache.ts      # qobrix_cache_stats, qobrix_cache_clear
     └── meta.ts       # Schema Discovery tools
 test-suite/

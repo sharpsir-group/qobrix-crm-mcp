@@ -16,6 +16,7 @@ import { registerDealTools } from "./deals.js";
 import { registerReportTools } from "./reports.js";
 import { registerPipelineTools } from "./pipeline.js";
 import { registerProductivityTools } from "./productivity.js";
+import { registerCustomerTools } from "./customers.js";
 import { registerCacheTools } from "./cache.js";
 
 export function formatResult(data: unknown) {
@@ -61,5 +62,6 @@ export function registerTools(server: McpServer): void {
   registerReportTools(server);
   registerPipelineTools(server);
   registerProductivityTools(server);
+  registerCustomerTools(server);
   registerCacheTools(server);
 }

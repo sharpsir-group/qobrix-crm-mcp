@@ -104,9 +104,14 @@ When the user asks anything that maps to a recurring sales/management report, pr
 - **Sales funnel + conversion %** → **qobrix_funnel**. Six canonical stages: leads → qualified → viewing → offer → reserved → closed. Scope with year/from/to/since_days, optional assigned_to (UUID or "CURRENT_USER") and agent. Use stage_overrides for tenant-specific stage definitions.
 - **Rep productivity / agent leaderboard / "my scorecard"** → **qobrix_rep_scorecard**. Omit the 'user' arg for a top-N leaderboard sorted by volume/commission/deals_closed/activities/viewings. Pass user="CURRENT_USER" for a single-rep wide row.
 - **Silent / stale leads** → **qobrix_stale_leads** (default since_days=30, statuses=["new","open"]). Builds a recent-activity set from calls/meetings/email-messages/tasks and returns open opportunities not in it whose opportunity row itself wasn't modified within the window.
+- **Repeat customers / cohort** → **qobrix_cohort**. Modes: 'buyers' (default, walks closed contracts → opportunity_id → opportunity.contact_name), 'sellers' (walks contracts → property_id → property.seller), 'leads' (groups opportunities by contact_name). Each repeat contact comes back with deal_count, total_volume, total_commission, first_deal, last_deal, and a deals[] breakdown.
+- **Win / loss analytics** → **qobrix_win_loss**. Returns global counts (new / open / won / closed_lost) and win_rate_pct. Optional group_by 'source' / 'enquiry_type' / 'owner' / 'agent' / 'closed_lost_reason_id' (or arrays for multi-dim). Window applied to last_status_change (fallback modified). Set include_top_losses=true for recent closed_lost details + resolved reason labels.
+- **Days on market** → **qobrix_days_on_market**. Joins Contracts → Properties on property_id, computes days = close_date − listing_date. Returns mean / median / p75 / p90 / min / max. kind defaults to 'sold' (cos + agreed). group_by 'property_type', 'city', 'agent', etc. Set include_outliers=true for top-5 longest and shortest deals.
 - **Multi-dimensional pivot (e.g. city × property_type)** → **qobrix_aggregate** with group_by as an array of 2-3 fields.
 
 Implementation note for stale leads: activity rows expose the linked opportunity under one of related_opportunity / related_opportunity_id / opportunity_id / opportunity (varies by tenant). The tool reads all of them defensively.
+
+Implementation note for win_loss / closed_lost_reason_id: the reason FK points at the lead-lost-reasons resource (label field is description). resolveId() now handles this automatically — agents can pass the raw UUID and the tool will emit the human-readable reason.
 
 ## Known quirks
 - Opportunities: avoid include=['Locations'] in list calls unless you also select the location FK in fields[].
