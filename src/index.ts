@@ -93,6 +93,15 @@ Example: status == "available" and sale_rent == "for_sale" and list_selling_pric
 All list endpoints return { data: [...], pagination: { count, current_page, has_next_page, has_prev_page, page_count, limit } }.
 Default limit=10, max 100. Exception: Media list returns { data: [...] } without pagination.
 
+## Payload defaults (important for big resources like Properties)
+List / search / get tools default to compact payloads:
+- **expand=false** — foreign keys come back as UUID strings, not nested objects. To resolve a UUID into a name, either call the corresponding get tool, use the include[] whitelist for the specific association you need, or rely on the high-level tools which auto-resolve common FKs.
+- **media=false** — inline media (photos, floor plans, thumbnails) is *not* attached to list rows. For media use qobrix_list_media(related_model='<Resource>', related_id=<uuid>).
+Override per call only when you actually need the heavier payload: pass expand=true and/or media=true. Prefer include[] for surgical expansion of specific associations.
+
+## Output cap
+Every tool result is capped at QOBRIX_MCP_MAX_RESULT_CHARS chars of rendered JSON (default 30,000 ≈ ~7.5 K tokens). When a paginated payload exceeds the cap it is truncated to the largest prefix of data[] that fits and a "_truncated" block is attached describing kept_rows / omitted_rows and a hint. When a non-paginated payload exceeds the cap, the JSON is clipped and a "QOBRIX_MCP TRUNCATED" trailer is appended. If you see truncation, scope the next call (smaller limit, fields[] whitelist, tighter search, drop expand/media).
+
 ## Discovering field names
 Call qobrix_get_schema with the resource name (e.g. 'Properties', 'Contacts', 'Opportunities') to discover all fields, types, and validation rules before building search expressions.
 

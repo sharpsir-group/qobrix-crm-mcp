@@ -26,12 +26,14 @@ export function registerPropertyTools(server: McpServer): void {
     "Recent listings → sort: '-created'. " +
     "Buyer-property match → feed results into qobrix_get_leads_by_property. " +
     "Listing media → follow up with qobrix_list_media(related_model='Properties'). " +
-    "Set media=false to reduce payload when images are not needed. Default limit 10, max 100.",
+    "PAYLOAD DEFAULTS: expand=false and media=false — FKs come back as UUIDs and media is not inlined " +
+    "(set expand=true / media=true explicitly when full nested objects or media URLs are needed). " +
+    "Prefer include[] for surgical expansion of specific associations. Default limit 10, max 100.",
     ListPropertiesSchema.shape,
-    async ({ limit, page, sort, fields, include, media, search }) => {
+    async ({ limit, page, sort, fields, include, media, expand, search }) => {
       try {
         const result = await getClient().list("properties", {
-          limit, page, sort, fields, include, media, search,
+          limit, page, sort, fields, include, media, expand, search,
         });
         return formatResult(result);
       } catch (error) {
@@ -55,9 +57,9 @@ export function registerPropertyTools(server: McpServer): void {
     "include=['SellerContacts'] → seller/owner (RESO OwnerMember). " +
     "FK fields: agent → Agents, seller → Contacts, project → Projects, salesperson → Users.",
     GetPropertySchema.shape,
-    async ({ id, include }) => {
+    async ({ id, include, expand }) => {
       try {
-        const result = await getClient().get("properties", id, { include });
+        const result = await getClient().get("properties", id, { include, expand });
         return formatResult(result);
       } catch (error) {
         return errorResult(error);
@@ -82,10 +84,10 @@ export function registerPropertyTools(server: McpServer): void {
     "covered_area_amount, plot_area_amount, new_build, sea_view, agent, project, created, modified. " +
     "After finding matches, use qobrix_get_leads_by_property to see who else is interested.",
     SearchPropertiesSchema.shape,
-    async ({ search, limit, page, sort, fields }) => {
+    async ({ search, limit, page, sort, fields, media, expand }) => {
       try {
         const result = await getClient().list("properties", {
-          search, limit, page, sort, fields,
+          search, limit, page, sort, fields, media, expand,
         });
         return formatResult(result);
       } catch (error) {

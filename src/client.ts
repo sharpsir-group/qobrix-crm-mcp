@@ -92,12 +92,17 @@ export class QobrixClient {
   }
 
   async list(resource: string, opts: ListOpts = {}): Promise<QobrixPaginatedResponse> {
+    // Defaults: compact payloads. Qobrix's own defaults expand all FKs into
+    // nested objects and inline media metadata, which blows up tool outputs
+    // (a single Properties row can be 30 KB+). Default expand/media to false
+    // so list/get tools return short, FK-as-UUID rows. Callers can opt in
+    // explicitly with expand: true or media: true.
     const params: Record<string, string | string[] | boolean | number | undefined> = {
       limit: opts.limit,
       page: opts.page,
       search: opts.search,
-      expand: opts.expand,
-      media: opts.media,
+      expand: opts.expand ?? false,
+      media: opts.media ?? false,
       trashed: opts.trashed,
       segment: opts.segment,
       related_model: opts.related_model,
@@ -113,7 +118,7 @@ export class QobrixClient {
 
   async get(resource: string, id: string, opts: GetOpts = {}): Promise<QobrixSingleResponse> {
     const params: Record<string, string | string[] | boolean | number | undefined> = {
-      expand: opts.expand,
+      expand: opts.expand ?? false,
       trashed: opts.trashed,
     };
 

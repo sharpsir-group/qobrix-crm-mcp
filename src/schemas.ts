@@ -50,7 +50,16 @@ export const ListPropertiesSchema = z.object({
     "Opportunities, PropertyViewings, Translations, SalespersonUsers, CreatedByUsers, " +
     "ModifiedByUsers, LocationLocations, AgentAgents, SellerContacts, ProjectProjects"
   ),
-  media: z.boolean().optional().describe("Include media in response (default true). Set to false to reduce payload size."),
+  media: z.boolean().optional().describe(
+    "Include inline media (photos, floor plans, thumbnails) on each row. Default false. " +
+    "Each media-rich property can add 5-20 KB; only set true when the caller needs media URLs. " +
+    "For media alone use qobrix_list_media(related_model='Properties', related_id=<uuid>)."
+  ),
+  expand: z.boolean().optional().describe(
+    "Expand FK references into full nested objects (developer, project, seller, location, etc.). " +
+    "Default false. With expand=false each FK is just a UUID string — much smaller payload. " +
+    "Prefer include[] for surgical expansion of specific associations."
+  ),
   search: z.string().optional().describe(SEARCH_DESCRIPTION),
 });
 
@@ -61,6 +70,10 @@ export const GetPropertySchema = z.object({
     "Opportunities, PropertyViewings, Translations, SalespersonUsers, CreatedByUsers, " +
     "LocationLocations, AgentAgents, SellerContacts, ProjectProjects"
   ),
+  expand: z.boolean().optional().describe(
+    "Expand FK references into full nested objects. Default false (FKs stay as UUID strings). " +
+    "Prefer include[] for surgical expansion of specific associations."
+  ),
 });
 
 export const SearchPropertiesSchema = z.object({
@@ -68,6 +81,12 @@ export const SearchPropertiesSchema = z.object({
   ...paginationParams,
   ...sortParam,
   ...fieldsParam,
+  media: z.boolean().optional().describe(
+    "Include inline media on each row. Default false. Only set true when media URLs are needed."
+  ),
+  expand: z.boolean().optional().describe(
+    "Expand FK references into nested objects. Default false (FKs stay as UUID strings)."
+  ),
 });
 
 export const GetPropertyCoordinatesSchema = z.object({

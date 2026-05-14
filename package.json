@@ -15,7 +15,8 @@
     "test:scenarios": "node --env-file=.env --test test-suite/scenarios.test.mjs",
     "test:workflows": "node --env-file=.env --test test-suite/workflows.test.mjs",
     "test:cache": "node --test test-suite/cache.test.mjs",
-    "test:all": "node --env-file=.env --test test-suite/integration.test.mjs test-suite/scenarios.test.mjs test-suite/workflows.test.mjs test-suite/cache.test.mjs"
+    "test:format": "node --test test-suite/format.test.mjs",
+    "test:all": "node --env-file=.env --test test-suite/integration.test.mjs test-suite/scenarios.test.mjs test-suite/workflows.test.mjs test-suite/cache.test.mjs test-suite/format.test.mjs"
   },
   "keywords": [
     "mcp",

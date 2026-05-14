@@ -448,9 +448,52 @@ Only `include[]` values marked **Verified** in tool descriptions are guaranteed 
 
 ---
 
+### Payload defaults
+
+To keep tool outputs short enough for the calling LLM's context window, list / search / get tools default to **compact** payloads:
+
+| Param | Default | Effect when default |
+|-------|---------|---------------------|
+| `expand` | `false` | Foreign keys come back as **UUID strings** instead of being expanded into nested objects. Resolve them on demand with the matching get tool or with a targeted `include[]`. |
+| `media`  | `false` | Inline media (photos, floor plans, thumbnail URLs) is **not** attached to list rows. Use `qobrix_list_media({ related_model: 'Properties', related_id: '<uuid>' })` when media is actually needed. |
+
+Override per call only when the caller actually needs the heavier payload:
+
+```ts
+// Cheap browse — recommended for most reporting / pipeline calls
+qobrix_list_properties({ limit: 10 });
+
+// Heavy detail — only when the LLM truly needs nested FKs + media URLs
+qobrix_list_properties({ limit: 5, expand: true, media: true });
+
+// Prefer surgical include[] over full expand=true:
+qobrix_get_property({ id: "...", include: ["AgentAgents", "ProjectProjects"] });
+```
+
+This change typically shrinks `qobrix_list_properties({ limit: 10 })` from ~300 KB to ~5–10 KB.
+
+---
+
+### Output cap
+
+Every tool result is capped at `QOBRIX_MCP_MAX_RESULT_CHARS` characters of rendered JSON (default **30 000**, roughly 7.5 K tokens). Behaviour:
+
+- **Paginated payloads** (`{ data: [...], pagination: {...} }`): truncated to the largest prefix of `data[]` that fits, and a `_truncated` block is attached with `kept_rows`, `omitted_rows`, `original_chars`, `max_chars`, and a `hint` telling the LLM how to scope the next call.
+- **Non-paginated payloads** (single `get`, custom analytic shapes): the JSON is clipped at the cap and a `QOBRIX_MCP TRUNCATED` trailer is appended with the same guidance.
+
+Override the cap with the env var (set to `0` to disable, not recommended in production):
+
+```bash
+QOBRIX_MCP_MAX_RESULT_CHARS=60000
+```
+
+If you regularly hit the cap, that's a signal to use `fields[]` (whitelist columns), a tighter `search` expression, a smaller `limit`, or keep `expand=false` / `media=false`.
+
+---
+
 ### Testing
 
-The project includes **167 automated tests** across **47** `describe` suites (integration, multi-step scenarios, RESO workflows, and cache behavior):
+The project includes **172 automated tests** across **48** `describe` suites (integration, multi-step scenarios, RESO workflows, cache, and output-cap behaviour):
 
 ```bash
 # Integration tests — individual tool mechanics
@@ -465,16 +508,20 @@ npm run test:workflows
 # Cache tests — read-through, single-flight, LRU eviction (no API needed)
 npm run test:cache
 
+# Format tests — output cap + truncation behaviour (no API needed)
+npm run test:format
+
 # Run everything
 npm run test:all
 ```
 
 | Suite | Tests | Coverage |
 |-------|-------|----------|
-| Integration | 55 | Every tool, pagination edge cases, include/fields mechanics |
+| Integration | 70 | Every tool, pagination edge cases, include/fields mechanics, analytics + reporting tools |
 | Scenarios | 54 | Agent morning brief, buyer search, lead triage, FK chains, pipeline reports |
 | Workflows | 39 | Listing lifecycle, lead funnel, sales pipeline, showing, transaction, media, activity, schema |
 | Cache | 19 | Read-through cache, single-flight coalescing, LRU eviction, key canonicalization (no live API) |
+| Format | 5 | `formatResult` output cap, paginated truncation with `_truncated` marker, fallback trailer, env override (no live API) |
 
 ---
 
