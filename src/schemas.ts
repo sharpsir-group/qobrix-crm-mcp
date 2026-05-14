@@ -443,6 +443,131 @@ export const TopValuesSchema = z.object({
   ),
 });
 
+export const TopRecordsSchema = z.object({
+  resource: z.string().describe(RESOURCE_DESCRIPTION),
+  sort_by: z.string().describe(
+    "Field to sort by (numeric or ISO date). Pages through results and sorts in-process — " +
+    "use this when the list/search 'sort' param is silently ignored by the Qobrix API " +
+    "(common for nullable/computed numeric fields like contracts.final_selling_price_amount)."
+  ),
+  desc: z.boolean().optional().describe("Sort descending (default true)."),
+  top: z.number().min(1).max(50).optional().describe(
+    "Number of top records to return (default 10, max 50)."
+  ),
+  search: z.string().optional().describe(SEARCH_DESCRIPTION),
+  fields: z.array(z.string()).optional().describe(
+    "Optional projection. Always-resolved FK keys (property_id, agent, owner, assigned_to, etc.) " +
+    "are fetched regardless; this just limits other fields on the raw row."
+  ),
+  include: z.array(z.string()).optional().describe(
+    "Optional Qobrix associations to expand inline (passed through to the underlying list call)."
+  ),
+  resolve: z.array(z.string()).optional().describe(
+    "Extra FK field names to resolve to readable names, in addition to the always-resolve set " +
+    "(property_id, agent, owner, assigned_to, commission_to, commission_to_2, contact_name, " +
+    "salesperson, seller, project, developer_id, campaign_id)."
+  ),
+});
+
+const AGGREGATE_OPS = ["sum", "avg", "min", "max", "count"] as const;
+
+export const AggregateSchema = z.object({
+  resource: z.string().describe(RESOURCE_DESCRIPTION),
+  field: z.string().describe(
+    "Numeric field to aggregate (e.g. 'final_selling_price_amount', 'commission_value_amount', " +
+    "'list_selling_price_amount'). For op='count', any field works (only non-null values are counted)."
+  ),
+  op: z.enum(AGGREGATE_OPS).describe(
+    "Aggregation: 'sum' total, 'avg' mean, 'min'/'max' extremes, 'count' rows with a non-empty value."
+  ),
+  search: z.string().optional().describe(SEARCH_DESCRIPTION),
+  group_by: z.string().optional().describe(
+    "Optional grouping field (e.g. 'commission_to_2' for agent leaderboard, 'property_type' " +
+    "for type-mix, 'city' for geo). Without group_by returns a single aggregate."
+  ),
+  top: z.number().min(1).max(50).optional().describe(
+    "When group_by is set, number of top buckets to return (default 10, max 50). Buckets sorted by op desc."
+  ),
+  resolve: z.boolean().optional().describe(
+    "If true and group_by looks like a UUID FK, resolve bucket keys to readable names. " +
+    "Defaults to true when group_by is in the always-resolve set, false otherwise."
+  ),
+});
+
+// ---------------------------------------------------------------------------
+// Deals (domain shortcut over Contracts)
+// ---------------------------------------------------------------------------
+
+const DEAL_KINDS = ["sale", "rental", "listing", "any_revenue", "any"] as const;
+const DEAL_BY = ["price", "commission", "date"] as const;
+const DEAL_DATE_FIELDS = [
+  "date_of_contract",
+  "date_of_reservation",
+  "start_date",
+  "end_date",
+  "created",
+  "modified",
+] as const;
+
+export const DealsSchema = z.object({
+  kind: z.enum(DEAL_KINDS).optional().describe(
+    "Semantic shortcut (default 'sale'). Sets default contract_types when contract_types is omitted: " +
+    "'sale'=['cos'], 'rental'=['tenancy_agreement'], 'listing'=['listing_for_sale','listing_for_rent'], " +
+    "'any_revenue'=['cos','tenancy_agreement'], 'any'=no contract_type filter."
+  ),
+  contract_types: z.array(z.string()).optional().describe(
+    "Explicit contract types (overrides kind defaults). Subset of: " +
+    "cos, tenancy_agreement, listing_for_sale, listing_for_rent, property_management, viewing_agreement."
+  ),
+  contract_statuses: z.array(z.string()).optional().describe(
+    "Contract statuses (default ['agreed']). Use ['reserved','agreed'] for under-contract + closed, " +
+    "['reserved'] for pipeline only, ['cancelled'] for fall-throughs."
+  ),
+  include_reserved: z.boolean().optional().describe(
+    "Convenience flag: when true, adds 'reserved' to contract_statuses."
+  ),
+  year: z.number().int().optional().describe("Calendar year window (e.g. 2026)."),
+  from: z.string().optional().describe("ISO date (YYYY-MM-DD) inclusive lower bound."),
+  to: z.string().optional().describe("ISO date (YYYY-MM-DD) exclusive upper bound."),
+  since_days: z.number().int().optional().describe(
+    "Rolling window: only deals dated within the last N days. Mutually exclusive with year/from/to."
+  ),
+  date_field: z.enum(DEAL_DATE_FIELDS).optional().describe(
+    "Which date column to filter by (default depends on kind: sale=date_of_contract, " +
+    "rental=start_date, listing=created, otherwise date_of_contract)."
+  ),
+  min_price: z.number().optional().describe(
+    "Lower bound on the kind's natural price field (selling for sale, rental for rental)."
+  ),
+  max_price: z.number().optional().describe(
+    "Upper bound on the kind's natural price field."
+  ),
+  assigned_to: z.string().optional().describe(
+    "User UUID assigned to the contract, or the special token 'CURRENT_USER'."
+  ),
+  commission_to: z.string().optional().describe(
+    "User UUID receiving commission (commission_to), or 'CURRENT_USER'."
+  ),
+  commission_to_2: z.string().optional().describe(
+    "Agent UUID receiving commission (commission_to_2)."
+  ),
+  agent: z.string().optional().describe(
+    "Convenience alias for commission_to_2 (the deal's broker/external agent)."
+  ),
+  search: z.string().optional().describe(
+    "Extra raw Qobrix search expression ANDed with everything else (escape hatch for niche filters)."
+  ),
+  by: z.enum(DEAL_BY).optional().describe(
+    "Sort axis (default 'price'). 'price' uses final_selling_price_amount (sale), " +
+    "final_rental_price_amount (rental), or per-row coalesce for mixed kinds. " +
+    "'commission' uses commission_value_amount. 'date' uses the resolved date_field."
+  ),
+  desc: z.boolean().optional().describe("Sort descending (default true)."),
+  top: z.number().min(1).max(50).optional().describe(
+    "Number of deals to return (default 10, max 50). The summary block always covers the full filtered set."
+  ),
+});
+
 // ---------------------------------------------------------------------------
 // Cache
 // ---------------------------------------------------------------------------
