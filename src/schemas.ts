@@ -411,6 +411,39 @@ export const GetEmailMessageSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
+
+const RESOURCE_DESCRIPTION =
+  "Resource name (case-sensitive, lowercase plural as used by Qobrix API). " +
+  "Values: properties, opportunities, contacts, agents, tasks, property-viewings, " +
+  "projects, offers, contracts, calls, meetings, email-messages.";
+
+export const CountSchema = z.object({
+  resource: z.string().describe(RESOURCE_DESCRIPTION),
+  search: z.string().optional().describe(SEARCH_DESCRIPTION),
+});
+
+export const TopValuesSchema = z.object({
+  resource: z.string().describe(RESOURCE_DESCRIPTION),
+  field: z.string().describe(
+    "Field name to aggregate by (e.g. 'developer_id', 'agent', 'status', 'source', 'owner', 'city', 'property_type'). " +
+    "Must be a top-level scalar field on the resource."
+  ),
+  search: z.string().optional().describe(
+    "Optional Qobrix search expression to filter records before aggregating. " +
+    'Example: \'status == "available" and sale_rent == "for_sale"\' to only aggregate active sale listings.'
+  ),
+  top: z.number().min(1).max(50).optional().describe(
+    "Number of top values to return (default 10, max 50). Returns the N most-frequent values."
+  ),
+  resolve: z.boolean().optional().describe(
+    "If true, attempt to resolve UUID foreign keys to human-readable names by looking up " +
+    "the referenced entity (Contacts, Agents, Projects, Users). Default false."
+  ),
+});
+
+// ---------------------------------------------------------------------------
 // Schema / Metadata
 // ---------------------------------------------------------------------------
 
