@@ -18,6 +18,7 @@ import { registerPipelineTools } from "./pipeline.js";
 import { registerProductivityTools } from "./productivity.js";
 import { registerCustomerTools } from "./customers.js";
 import { registerCacheTools } from "./cache.js";
+import { registerAuditTools } from "./audit.js";
 
 // Hard cap on tool result size, in characters of the rendered JSON text.
 // Default 30 000 chars ≈ 7.5 K tokens, which keeps a multi-tool turn well under
@@ -166,4 +167,5 @@ export function registerTools(server: McpServer): void {
   registerProductivityTools(server);
   registerCustomerTools(server);
   registerCacheTools(server);
+  registerAuditTools(server);
 }

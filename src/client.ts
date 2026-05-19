@@ -4,6 +4,7 @@ import type {
   QobrixErrorResponse,
   ListOpts,
   GetOpts,
+  ChangesOpts,
 } from "./types.js";
 import { getCache, cacheKey } from "./cache.js";
 
@@ -62,6 +63,42 @@ export class QobrixClient {
     }
     const key = cacheKey("request", path, params);
     return cache.fetch<T>(key, () => this.fetchUpstream<T>(path, params));
+  }
+
+  /** Bypass response cache — use for audit / change-log reads that must be fresh. */
+  async requestFresh<T>(
+    path: string,
+    params?: Record<string, string | string[] | boolean | number | undefined>
+  ): Promise<T> {
+    return this.fetchUpstream<T>(path, params);
+  }
+
+  private changesParams(opts: ChangesOpts = {}): Record<string, string | string[] | boolean | number | undefined> {
+    const params: Record<string, string | string[] | boolean | number | undefined> = {
+      limit: opts.limit,
+      page: opts.page,
+      search: opts.search,
+    };
+    if (opts.sort !== undefined) {
+      params.sort = Array.isArray(opts.sort) ? opts.sort : opts.sort;
+    }
+    if (opts.fields) params.fields = opts.fields;
+    return params;
+  }
+
+  async listChanges(resource: string, opts: ChangesOpts = {}): Promise<QobrixPaginatedResponse> {
+    return this.request<QobrixPaginatedResponse>(`${resource}/changes`, this.changesParams(opts));
+  }
+
+  async getRecordChanges(
+    resource: string,
+    id: string,
+    opts: ChangesOpts = {}
+  ): Promise<QobrixPaginatedResponse> {
+    return this.request<QobrixPaginatedResponse>(
+      `${resource}/${id}/changes`,
+      this.changesParams(opts)
+    );
   }
 
   private async fetchUpstream<T>(

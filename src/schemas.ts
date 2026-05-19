@@ -802,6 +802,108 @@ export const DaysOnMarketSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Audit / Change log
+// ---------------------------------------------------------------------------
+
+const auditResourceParam = {
+  resource: z.string().describe(
+    "CRM resource name. PascalCase (e.g. 'Opportunities', 'Properties', 'Contracts') or " +
+    "kebab slug (e.g. 'opportunities'). Maps to GET /api/v2/{resource}/changes. " +
+    "Common values: Opportunities, Properties, Contacts, Contracts, Offers, Tasks, Calls, Meetings."
+  ),
+};
+
+const auditFieldsParam = {
+  fields: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "LogAudit columns to return. Default all. Recommended for large scans: " +
+      "['timestamp','user_id','primary_key','original','changed','type']"
+    ),
+};
+
+export const GetChangesSchema = z.object({
+  ...auditResourceParam,
+  id: z.string().describe("Record UUID — the opportunity/property/contact primary key"),
+  search: z.string().optional().describe(SEARCH_DESCRIPTION),
+  ...auditFieldsParam,
+  sort: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .describe("Sort field(s). Prefix - for descending. Example: '-timestamp' (newest first)."),
+  ...paginationParams,
+});
+
+export const SearchChangesSchema = z.object({
+  ...auditResourceParam,
+  search: z.string().optional().describe(
+    "Qobrix search on LogAudit rows. Examples: " +
+    "'timestamp >= DAYS_AGO(30)', 'user_id == \"<uuid>\"', " +
+    "'primary_key == \"<opportunity-uuid>\"'."
+  ),
+  ...auditFieldsParam,
+  sort: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .describe("Sort field(s). Example: '-timestamp'."),
+  ...paginationParams,
+});
+
+export const FieldChangeHistorySchema = z.object({
+  ...auditResourceParam,
+  id: z.string().describe("Record UUID to inspect"),
+  field: z.string().describe(
+    "CRM field name whose edits to extract from original/changed objects. " +
+    "Example: 'source', 'status', 'agent'. NOT the LogAudit.source column (that is the resource name)."
+  ),
+  resolve_users: z
+    .boolean()
+    .optional()
+    .describe("When true, resolve user_id to display name via Users API (default false)."),
+  max_pages: z
+    .number()
+    .min(1)
+    .max(50)
+    .optional()
+    .describe("Max API pages to fetch (100 rows/page). Default 10 (1000 audit rows)."),
+});
+
+export const TopFieldChangersSchema = z.object({
+  ...auditResourceParam,
+  field: z.string().describe(
+    "Field name to rank editors by (must appear in LogAudit.changed). Example: 'source'."
+  ),
+  since: z
+    .string()
+    .optional()
+    .describe(
+      "Lower bound for timestamp search. Qobrix expression fragment or full clause. " +
+      "Examples: 'DAYS_AGO(180)' (auto-wrapped as timestamp >= ...), '2025-01-01'."
+    ),
+  until: z
+    .string()
+    .optional()
+    .describe("Upper bound. Example: 'NOW' or ISO date. Wrapped as timestamp <= ... when bare."),
+  limit: z
+    .number()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe("Max users in leaderboard (default 20)."),
+  resolve_users: z
+    .boolean()
+    .optional()
+    .describe("When true, resolve user_id to display name (default false)."),
+  max_pages: z
+    .number()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe("Max API pages to scan (100 rows/page). Default 50 (5000 audit rows)."),
+});
+
+// ---------------------------------------------------------------------------
 // Cache
 // ---------------------------------------------------------------------------
 
