@@ -46,6 +46,24 @@ function isLoopbackHost(host: string): boolean {
   return host === "127.0.0.1" || host === "localhost" || host === "::1";
 }
 
+/**
+ * Host header allowlist for createMcpExpressApp.
+ * When the server binds to loopback (typical for ragchat → 127.0.0.1:3502),
+ * always include loopback Host values even if ALLOWED_HOSTS only lists the
+ * public hostname used behind a reverse proxy.
+ */
+function resolveAllowedHosts(bindHost: string): string[] | undefined {
+  const fromEnv = process.env.QOBRIX_MCP_ALLOWED_HOSTS
+    ? process.env.QOBRIX_MCP_ALLOWED_HOSTS.split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+  if (!fromEnv.length) return undefined;
+  if (!isLoopbackHost(bindHost)) return fromEnv;
+  const loopback = ["127.0.0.1", "localhost", "::1"];
+  return [...new Set([...fromEnv, ...loopback])];
+}
+
 function successHtml(subject?: string): string {
   const who = subject ? ` (subject ${subject.slice(0, 12)}…)` : "";
   return `<!DOCTYPE html>
@@ -81,9 +99,7 @@ export async function startHttpServer(): Promise<void> {
 
   const app = createMcpExpressApp({
     host,
-    allowedHosts: process.env.QOBRIX_MCP_ALLOWED_HOSTS
-      ? process.env.QOBRIX_MCP_ALLOWED_HOSTS.split(",").map((s) => s.trim())
-      : undefined,
+    allowedHosts: resolveAllowedHosts(host),
   });
   // Behind Apache/Cloudflare — required for express-rate-limit + X-Forwarded-For
   // Cloudflare -> Apache -> Node (two trusted hops for X-Forwarded-For).

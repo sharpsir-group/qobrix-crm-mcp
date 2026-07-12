@@ -7,6 +7,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ---
 
+## [1.4.2] - 2026-07-12
+
+### Fixed
+
+- When bound to loopback, `QOBRIX_MCP_ALLOWED_HOSTS` now always includes
+  `127.0.0.1` / `localhost` / `::1` so local agents (e.g. ragchat →
+  `http://127.0.0.1:3502/mcp`) are not rejected with `403 Invalid Host` when the
+  env list only names the public reverse-proxy hostname.
+
+---
+
 ## [1.4.1] - 2026-07-12
 
 ### Fixed

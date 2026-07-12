@@ -140,6 +140,7 @@ export QOBRIX_MCP_PUBLIC_URL=https://qobrix-mcp.example.com
 # Audience MUST include /mcp (do not omit — PUBLIC_URL fallback drops the path)
 export QOBRIX_MCP_RESOURCE_URL=https://qobrix-mcp.example.com/mcp
 export QOBRIX_MCP_ALLOWED_HOSTS=qobrix-mcp.example.com
+# When HOST is loopback, 127.0.0.1/localhost are auto-added so local agents work.
 
 # From the Enterprise OAuth bundle (identical secret on both sides)
 export QOBRIX_OAUTH_ISSUER=https://qobrix-oauth.example.com
