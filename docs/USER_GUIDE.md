@@ -2,14 +2,15 @@
 
 Connect Claude, Cursor, ChatGPT, PeerPane / ragchat, or any MCP client to live Qobrix CRM data.
 
-**Package version:** see [`package.json`](../package.json) (currently **1.5.0**).  
-**Tools:** **64** MCP tools (entities, analytics, reporting, audit, cache, session/identity). Full list: [README — Tools at a Glance](../README.md#tools-at-a-glance).
+**Package version:** see [`package.json`](../package.json) (currently **1.5.2**).  
+**Tools:** **64** MCP tools (entities, analytics, reporting, audit, cache, session/identity). Full list: [README — Tools at a Glance](../README.md#tools-at-a-glance).  
+**Changelog:** [`CHANGELOG.md`](../CHANGELOG.md).
 
 | Mode | Transport | Credentials | Best for |
 |------|-----------|-------------|----------|
-| **A** (default, free) | stdio | Shared `QOBRIX_API_*` env | Local IDE, one shared CRM identity |
-| **B** (free) | HTTP | Per-request `X-Api-User` / `X-Api-Key` | Trusted private callers (localhost ragchat, internal services) |
-| **C** (Enterprise) | HTTP | Self-service OAuth (`/connect` → login) | Signed-in CRM user (**one shared vault per MCP process** — not multi-tenant isolation) |
+| **A** (default) | stdio | Shared `QOBRIX_API_*` env | Local IDE, one shared CRM identity |
+| **B** | HTTP | Per-request `X-Api-User` / `X-Api-Key` | Trusted private callers (localhost ragchat, internal services) |
+| **C** (needs Enterprise OAuth AS) | HTTP | Self-service OAuth (`/connect` → login) | Signed-in CRM user (**one shared vault per MCP process** — not multi-tenant isolation) |
 
 **Prerequisites:** Node.js **≥ 20**, a Qobrix tenant URL, and API credentials (Modes A/B) or SharpSir’s **Enterprise OAuth** bundle (Mode C).
 
@@ -73,6 +74,11 @@ npm start
 ### 4. Smoke test
 
 Ask the agent: *“How many available properties are in the CRM?”* — it should call `qobrix_search_properties` / `qobrix_count` and return live numbers.
+
+**Most expensive listing (and other ordered pages):** use list/search with
+`sort: "-list_selling_price_amount"` (OpenAPI `sort[]`). For a full-inventory
+top-N or nullable fields that return no rows under server sort, use
+`qobrix_top_records` / `qobrix_aggregate` instead.
 
 **Security:** Mode A is a shared identity. Do not expose the stdio process over the network. (HTTP + `QOBRIX_MCP_AUTH=env` also exists in code for shared-env over HTTP — prefer Mode B/C for multi-caller deployments.)
 

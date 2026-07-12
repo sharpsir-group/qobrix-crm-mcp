@@ -25,6 +25,13 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
   nullable fields (e.g. `opportunities.budget`) that can return no rows under
   server sort.
 
+### Docs
+
+- README / CHANGELOG / GitHub About no longer use freemium/PLG framing. Modes A/B
+  ship in this open-source package; Mode C pairs with SharpSir’s separate
+  **Enterprise OAuth** (SSO) product upon request — not an upsell path described
+  as product-led growth.
+
 ---
 
 ## [1.5.1] - 2026-07-12
