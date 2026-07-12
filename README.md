@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Connect Claude, Cursor, and other MCP clients to your Qobrix real-estate CRM</strong> — listings, leads, viewings, offers, contracts, and activity in one read-only <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> layer.<br />
-  <strong>64 tools</strong> (CRM entities + AI relevance search + analytics + audit + cache controls + session/identity), <a href="https://www.reso.org/data-dictionary/">RESO Data Dictionary 2.0</a> workflows, optional <strong>Redis-backed response caching</strong>, <strong>three auth modes</strong> (stdio / headers / OAuth 2.1), and <strong>219 automated tests</strong>.
+  <strong>64 tools</strong> (CRM entities + AI relevance search + analytics + audit + cache controls + session/identity), <a href="https://www.reso.org/data-dictionary/">RESO Data Dictionary 2.0</a> workflows, optional <strong>Redis-backed response caching</strong>, <strong>three auth modes</strong> (stdio / headers / OAuth 2.1), and <strong>226 automated tests</strong>.
 </p>
 
 <p align="center">
@@ -66,7 +66,7 @@ An AI assistant connected to this server can browse properties, qualify leads, t
 - **Brokerages & developers** using [Qobrix](https://qobrix.com/) who want ChatGPT, Claude, or Cursor to answer questions grounded in live CRM data (not copy-pasted exports).
 - **Engineers** wiring **MCP** into internal tools: stdio transport, typed Zod inputs, and no write surface — safe to experiment with prompts and agents.
 - **Data & operations teams** running dashboards: use **`qobrix_count`** / **`qobrix_top_values`** for YoY-style metrics without custom scripts, and **response caching** to cut API load on repeat queries.
-- **Enterprise IT** ready for per-agent identity: start free (Modes A/B), then request SharpSir’s **Enterprise OAuth** bundle when every user must authenticate as themselves — see [Enterprise OAuth](#enterprise-oauth).
+- **Enterprise IT** ready for per-agent identity: run Modes A/B from this package, then pair Mode C with SharpSir’s **Enterprise OAuth** (SSO) product when every user must authenticate as themselves — see [Enterprise OAuth](#enterprise-oauth).
 
 ### Canonical RE Workflows
 
@@ -119,7 +119,7 @@ The server is organized around six RESO-aligned business processes. The LLM rece
 | **Meetings** | 2 | List, Get |
 | **Email Messages** | 2 | List, Get |
 | **Schema / Meta** | 3 | Get Schema (field discovery), Get Field Options (enum values), Search DSL Help (full grammar + cheatsheets) |
-| **Analytics** | 4 | Counts, top-N field values, top-N records by numeric/date, and sum/avg/min/max/count aggregates (with single- or multi-dim grouping) — bypasses the Qobrix `sort` quirk on calculated/nullable fields |
+| **Analytics** | 4 | Counts, top-N field values, full-scan top-N records by numeric/date, and sum/avg/min/max/count aggregates (with single- or multi-dim grouping). Prefer list/search `sort` for a single page; use top_records/aggregate for full-set scans or nullable fields |
 | **Deals** | 1 | Flexible domain shortcut over the Contracts table (sales, rentals, listings, pipeline) with kind / contract_types[] / contract_statuses[] / date_field / min_price / party filters / summary block |
 | **Reporting** | 6 | Time-series with YoY (`qobrix_timeseries`), canonical sales funnel + conversion % (`qobrix_funnel`), per-rep scorecard / agent leaderboard (`qobrix_rep_scorecard`), silent-lead detection (`qobrix_stale_leads`), win-rate analytics (`qobrix_win_loss`), days-on-market (`qobrix_days_on_market`) |
 | **Customers** | 1 | Repeat-buyer / seller / lead cohorts (`qobrix_cohort`) — find contacts that appear on multiple closed deals or opportunities |
@@ -131,11 +131,12 @@ Every tool description includes its canonical workflow role, RESO equivalent, ve
 
 #### Analytics & Deals usage examples
 
-The Qobrix REST API silently ignores `sort` on some calculated/nullable numeric
-fields (notably `contracts.final_selling_price_amount` and
-`opportunities.budget`), and "closed deals" don't actually live as a single
-property flag — they're rows in the **Contracts** table. The three new tools
-remove the need for client-side scripting:
+Server-side `sort` (OpenAPI `sort[]`) works for most fields — e.g.
+`sort: "-list_selling_price_amount"` on properties. Use **`qobrix_top_records`** /
+**`qobrix_aggregate`** when you need a full-dataset scan, or when a nullable
+field (e.g. `opportunities.budget`) returns no rows under server sort.
+"Closed deals" don't live as a property flag — they're rows in the **Contracts**
+table. The analytics/deals tools remove the need for client-side scripting:
 
 ```jsonc
 // 1) Top 5 closed 2026 sales, sorted by final_selling_price_amount,
@@ -265,15 +266,15 @@ QOBRIX_LOCALE=en-US          # optional
 
 ### Auth modes
 
-This project is the **freemium PLG channel**: clone it, run Mode A or B, and put live Qobrix data in front of Claude, Cursor, or any MCP client — free under Apache 2.0.
+Clone this package, run Mode A or B, and put live Qobrix data in front of Claude, Cursor, or any MCP client — Apache 2.0.
 
-| Mode | Included free? | When | How credentials arrive |
-|------|----------------|------|------------------------|
+| Mode | In this package? | When | How credentials arrive |
+|------|------------------|------|------------------------|
 | **A** (default) | Yes | `QOBRIX_MCP_TRANSPORT=stdio` (or unset) | Shared `QOBRIX_API_*` from process env |
 | **B** | Yes | `TRANSPORT=http` + `QOBRIX_MCP_AUTH=headers` | Per-request `X-Api-User` / `X-Api-Key` (trusted callers; bind localhost) |
-| **C** | **Enterprise** | `TRANSPORT=http` + `QOBRIX_MCP_AUTH=oauth` | Self-service OAuth: MCP returns a `/connect` URL; user signs in at the **Enterprise OAuth solution**; this server holds the session |
+| **C** | Needs companion AS | `TRANSPORT=http` + `QOBRIX_MCP_AUTH=oauth` | Self-service OAuth: MCP returns a `/connect` URL; user signs in at SharpSir’s **Enterprise OAuth** Authorization Server; this server holds the session |
 
-Mode A and B are fully supported out of this package. Mode C is the upgrade path for user-authenticated CRM access without northbound client OAuth wiring.
+Modes A and B are fully supported out of this package. Mode C is for per-user authenticated CRM access (no northbound client OAuth wiring) and requires SharpSir’s separate Enterprise OAuth / SSO product — not distributed as part of this repo.
 
 ### Enterprise OAuth
 
@@ -613,7 +614,7 @@ If you regularly hit the cap or refine guard, use `fields[]` (whitelist columns)
 
 ### Testing
 
-The project includes **219 automated tests** across **61** `describe` suites (integration, multi-step scenarios, RESO workflows, cache, relevance, output-cap, and OAuth mode smoke):
+The project includes **226 automated tests** across **63** `describe` suites (integration, multi-step scenarios, RESO workflows, cache, relevance, output-cap, client-sort, and OAuth mode smoke):
 
 ```bash
 # Integration tests — individual tool mechanics
@@ -649,6 +650,7 @@ npm run test:all
 | Cache | 22 | Read-through cache, single-flight coalescing, LRU eviction, key canonicalization, search-page keys (no live API) |
 | Relevance | 23 | Boost eval/score/rank (incl. opportunity/contact shapes), fields[]+boost union, DSL help text, search cache-key stability (no live API) |
 | Format | 7 | `formatResult` output cap, paginated truncation, expand/media compaction (`kept_rows>=1`), `result_too_large` refine guard, fallback trailer, env override (no live API) |
+| Client sort | 7 | `normalizeSort` + `buildQobrixUrl` emit OpenAPI `sort[]=` (not scalar `sort=` that Qobrix ignores) |
 | OAuth modes | 3 | Mode B without headers, Mode C `/mcp` without bearer, elicitation `/connect` URL |
 
 ---
@@ -731,7 +733,7 @@ The server teaches the LLM at three levels:
 
 [Apache License 2.0](LICENSE) — Copyright 2025–2026 SharpSir Group
 
-**Freemium:** Modes A and B are included in this open-source package. **Mode C (Enterprise OAuth)** is a commercial solution bundle delivered by SharpSir upon request — [sharpsir.group](https://sharpsir.group) · [dev@sharpsir.group](mailto:dev@sharpsir.group).
+Modes A and B are included in this open-source package. **Mode C** pairs with SharpSir’s **Enterprise OAuth** Authorization Server (SSO / per-user identity) — a separate commercial product delivered upon request — [sharpsir.group](https://sharpsir.group) · [dev@sharpsir.group](mailto:dev@sharpsir.group).
 
 ---
 

@@ -28,7 +28,8 @@ export interface ListOpts {
   limit?: number;
   page?: number;
   search?: string;
-  sort?: string;
+  /** Maps to OpenAPI `sort[]` (array). Prefix with `-` for descending. */
+  sort?: string | string[];
   fields?: string[];
   include?: string[];
   expand?: boolean;

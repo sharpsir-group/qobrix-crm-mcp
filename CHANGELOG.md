@@ -7,6 +7,26 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ---
 
+## [1.5.2] - 2026-07-12
+
+### Fixed
+
+- **Server-side `sort` was silently dropped**: the OpenAPI spec defines the query
+  param as `sort[]` (array), but the client sent scalar `sort=…`. Qobrix ignored
+  the unknown key and returned default order — so "most expensive listing" and
+  similar queries looked broken. The client now emits `sort[]=` via
+  `normalizeSort()` (string / comma-separated / string[] all work).
+
+### Changed
+
+- Docs/tool descriptions no longer claim that `sort` is "silently ignored" on
+  calculated numeric fields. Prefer list/search `sort='-field'` for a page;
+  keep `qobrix_top_records` / `qobrix_aggregate` for full-dataset scans and
+  nullable fields (e.g. `opportunities.budget`) that can return no rows under
+  server sort.
+
+---
+
 ## [1.5.1] - 2026-07-12
 
 ### Fixed
@@ -136,35 +156,36 @@ When a tool needs auth:
 
 ## [1.3.0] - 2026-07-12
 
-### Agent-agnostic auth — Streamable HTTP + Modes A / B / C (freemium PLG)
+### Agent-agnostic auth — Streamable HTTP + Modes A / B / C
 
-Version 1.3.0 turns `qobrix-crm-mcp` into a **platform-agnostic MCP server** with a
-clear freemium path. Modes A and B ship free in this package. **Mode C** is the
-upgrade: per-user OAuth that requires SharpSir’s **Enterprise OAuth solution** —
-a commercial bundle (login + 2FA + consent, per-user API-key minting, encrypted
-vault, audience-bound tokens) delivered by our team **upon request**. It is not
-a public download.
+Version 1.3.0 turns `qobrix-crm-mcp` into a **platform-agnostic MCP server**.
+Modes A and B ship in this open-source package. **Mode C** adds per-user OAuth
+and requires SharpSir’s separate **Enterprise OAuth** Authorization Server
+(login + 2FA + consent, per-user API-key minting, encrypted vault,
+audience-bound tokens) — a commercial SSO product delivered **upon request**,
+not a public download of this repo.
 
-| Mode | Included | Role |
-|------|----------|------|
-| **A / B** | Free (this package) | Shared env key, or per-request headers for trusted hosts |
-| **C** | **Enterprise OAuth** (upon request) | Per-agent identity via SharpSir’s Enterprise OAuth solution |
+| Mode | In this package | Role |
+|------|-----------------|------|
+| **A / B** | Yes | Shared env key, or per-request headers for trusted hosts |
+| **C** | Needs companion AS | Per-agent identity via SharpSir’s Enterprise OAuth / SSO |
 
 Contact: [sharpsir.group](https://sharpsir.group) · [dev@sharpsir.group](mailto:dev@sharpsir.group)
 
 ### Value proposition
 
-**Start free. Upgrade when every agent must authenticate as themselves.**
-Brokerages can put Claude, Cursor, or an internal agent host in front of live
-Qobrix data today (Mode A/B). When they need per-user permissions, audit trails,
-and self-serve login — not a shared service account — they request the Enterprise
-OAuth solution. No third-party Authorization Servers; Mode C pairs exclusively
-with that bundle.
+**Modes A/B for shared or trusted-caller credentials; Mode C when every agent
+must authenticate as themselves.** Brokerages can put Claude, Cursor, or an
+internal agent host in front of live Qobrix data today (Mode A/B). When they
+need per-user permissions, audit trails, and self-serve login — not a shared
+service account — they deploy Mode C with SharpSir’s Enterprise OAuth product.
+No third-party Authorization Servers; Mode C pairs exclusively with that AS.
 
 Why this is a durable differentiator:
 
-- **Freemium PLG.** Clone, run, prove value in Cursor / Claude — then convert to
-  Enterprise OAuth when multi-user identity matters.
+- **Open MCP + optional Enterprise SSO.** Clone and run Modes A/B in Cursor /
+  Claude under Apache 2.0; pair Mode C with the Enterprise OAuth product when
+  multi-user identity matters.
 - **Agent-agnostic by design.** Register the remote `/mcp` URL; with Enterprise
   OAuth paired, the client discovers the AS (RFC 9728), completes DCR + PKCE,
   and opens the login page. No custom broker per host.

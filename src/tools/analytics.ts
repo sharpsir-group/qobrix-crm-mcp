@@ -427,12 +427,13 @@ export function registerAnalyticsTools(server: McpServer): void {
     "fields (property_id, agent, owner, assigned_to, commission_to, commission_to_2, " +
     "contact_name, salesperson, seller, project, developer_id, campaign_id) into readable " +
     "names so the agent doesn't have to chain lookups. " +
-    "Use this when Qobrix's `sort` query param is silently ignored (common for nullable / " +
-    "computed numeric fields like contracts.final_selling_price_amount or " +
-    "opportunities.budget). Example uses: " +
+    "Use this for full-dataset top-N, or when list/search `sort` returns no rows on a " +
+    "nullable/computed field (e.g. opportunities.budget). For a single page of highest " +
+    "list prices, prefer qobrix_list_properties / qobrix_search_properties with " +
+    "sort='-list_selling_price_amount'. Example uses: " +
     "Top 2026 closed sales: resource='contracts', sort_by='final_selling_price_amount', " +
     "search='contract_type == \"cos\" and contract_status == \"agreed\" and date_of_contract >= \"2026-01-01\" and date_of_contract < \"2027-01-01\"'. " +
-    "Largest active listings: resource='properties', sort_by='list_selling_price_amount', " +
+    "Largest active listings (full scan): resource='properties', sort_by='list_selling_price_amount', " +
     "search='status == \"available\" and sale_rent == \"for_sale\"'. " +
     "Most recently modified leads: resource='opportunities', sort_by='modified'.",
     TopRecordsSchema.shape,

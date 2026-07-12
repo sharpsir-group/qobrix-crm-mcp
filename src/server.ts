@@ -48,7 +48,7 @@ Offer → Contract → Payment → Close. The chain: Offer links Opportunity + P
 - **Offer chain**: qobrix_list_offers with include=['OpportunityOpportunities','PropertyProperties']
 - **Contract details**: qobrix_get_contract with include=['Contacts','PropertyIdProperties','PaymentInstallments','ContractParties']
 - **Deals (sales, rentals, listings, pipeline)**: prefer **qobrix_deals** — covers every "deal" question in one call. Deals live in the **Contracts** table. The default "closed deal" = contract_type == "cos" AND contract_status == "agreed", but rentals (tenancy_agreement), listing agreements, and under-contract reservations (contract_status == "reserved") are also deals. qobrix_deals accepts kind ("sale"|"rental"|"listing"|"any_revenue"|"any"), explicit contract_types[]/contract_statuses[], date_field + year/from/to/since_days, min_price/max_price, assigned_to/commission_to/commission_to_2/agent, and a raw search escape hatch. Property.status "sold" is the post-close inventory state, *not* the deal record — never use it as a substitute for the Contracts query.
-- **Top-N by amount on contracts/opportunities**: use **qobrix_top_records** (sort_by=final_selling_price_amount etc.) — the API's sort parameter is silently ignored on calculated/nullable numeric fields, so client-side fetch-and-sort is required.
+- **Top-N by amount on contracts/opportunities**: prefer server-side sort='-final_selling_price_amount' on list/search when a single page is enough. For full-dataset top-N (or nullable fields like opportunities.budget where server sort can return no rows), use **qobrix_top_records**.
 - **Sums / averages / leaderboards**: use **qobrix_aggregate** (e.g. op="sum" field="final_selling_price_amount" group_by="commission_to_2" for an agent leaderboard by 2026 volume).
 
 ### 6. Activity Tracking / Follow-up
@@ -137,8 +137,8 @@ Implementation note for win_loss / closed_lost_reason_id: the reason FK points a
 ## Known quirks
 - Opportunities: avoid include=['Locations'] in list calls unless you also select the location FK in fields[].
 - Media endpoint does not support search expressions or pagination metadata.
-- Sort: prefix with - for descending (e.g. sort='-created').
-- **Sort silently ignored on some numeric fields**: the API's sort parameter is dropped without error for calculated/nullable numeric fields (e.g. contracts.final_selling_price_amount, opportunities.budget). For top-N by such a field, use **qobrix_top_records** (fetches + sorts in-process). For totals, use **qobrix_aggregate**.
+- Sort: prefix with - for descending (e.g. sort='-created', sort='-list_selling_price_amount'). Maps to the API sort[] array param.
+- **Nullable/computed fields**: most numeric sorts work server-side. A few nullable columns (e.g. opportunities.budget) can return no rows under sort — for those, or for top-N across the whole matching set, use **qobrix_top_records** (fetches + sorts in-process). For totals, use **qobrix_aggregate**.
 - **Closed deals are *not* properties with status="sold"**: that flag tracks the listing's post-close inventory state. The deal record lives in **Contracts**. Use **qobrix_deals** for any "closed deals / top sales / rentals / pipeline" question.
 `.trim();
 
@@ -146,7 +146,7 @@ export function createServer(): McpServer {
   const server = new McpServer(
     {
       name: "qobrix-crm-mcp",
-      version: "1.5.1",
+      version: "1.5.2",
     },
     {
       instructions: SERVER_INSTRUCTIONS,

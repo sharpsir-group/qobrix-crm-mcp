@@ -356,8 +356,9 @@ export function registerDealTools(server: McpServer): void {
     "Defaults: kind='sale', contract_statuses=['agreed'] (so a no-arg call still means " +
     "'closed sale contracts'). Every default is overridable via kind / contract_types / " +
     "contract_statuses / include_reserved / date_field / min_price / max_price / party " +
-    "filters / raw search. Sorts in-process (Qobrix's `sort` is silently ignored on " +
-    "final_*_price_amount) and resolves property_id, agent, commission_to, lawyers, bank, " +
+    "filters / raw search. Sorts in-process across the matching set (for a single page of " +
+    "highest prices you can also use list/search with sort='-final_selling_price_amount') " +
+    "and resolves property_id, agent, commission_to, lawyers, bank, " +
     "etc. to readable names. Example uses: " +
     "Best 2026 closed sales: { year: 2026, top: 5 }. " +
     "Best 2026 rentals: { kind: 'rental', year: 2026, top: 5 }. " +

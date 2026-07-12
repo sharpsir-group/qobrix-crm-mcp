@@ -21,6 +21,47 @@ import {
 
 export { AuthRequiredError } from "./oauth-client.js";
 
+/**
+ * Coerce tool `sort` into the OpenAPI `sort[]` array form.
+ * Accepts a string, comma-separated multi-key string, or string[].
+ */
+export function normalizeSort(
+  sort?: string | string[]
+): string[] | undefined {
+  if (sort === undefined || sort === null) return undefined;
+  const arr = Array.isArray(sort) ? sort : String(sort).split(",");
+  const cleaned = arr.map((s) => s.trim()).filter(Boolean);
+  return cleaned.length ? cleaned : undefined;
+}
+
+/**
+ * Build a Qobrix `/api/v2/...` URL. Array values are emitted as `key[]=`
+ * (OpenAPI form for `sort[]`, `fields[]`, `include[]`).
+ */
+export function buildQobrixUrl(
+  baseUrl: string,
+  path: string,
+  params?: Record<string, string | string[] | boolean | number | undefined>
+): string {
+  const url = new URL(`${baseUrl.replace(/\/+$/, "")}/api/v2/${path}`);
+
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined || value === null) continue;
+
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          url.searchParams.append(`${key}[]`, String(item));
+        }
+      } else {
+        url.searchParams.set(key, String(value));
+      }
+    }
+  }
+
+  return url.toString();
+}
+
 export type QobrixClientOptions = {
   apiUrl: string;
   apiUser: string;
@@ -89,23 +130,7 @@ export class QobrixClient {
   }
 
   private buildUrl(path: string, params?: Record<string, string | string[] | boolean | number | undefined>): string {
-    const url = new URL(`${this.baseUrl}/api/v2/${path}`);
-
-    if (params) {
-      for (const [key, value] of Object.entries(params)) {
-        if (value === undefined || value === null) continue;
-
-        if (Array.isArray(value)) {
-          for (const item of value) {
-            url.searchParams.append(`${key}[]`, item);
-          }
-        } else {
-          url.searchParams.set(key, String(value));
-        }
-      }
-    }
-
-    return url.toString();
+    return buildQobrixUrl(this.baseUrl, path, params);
   }
 
   async request<T>(path: string, params?: Record<string, string | string[] | boolean | number | undefined>): Promise<T> {
@@ -131,9 +156,8 @@ export class QobrixClient {
       page: opts.page,
       search: opts.search,
     };
-    if (opts.sort !== undefined) {
-      params.sort = Array.isArray(opts.sort) ? opts.sort : opts.sort;
-    }
+    const sort = normalizeSort(opts.sort);
+    if (sort) params.sort = sort;
     if (opts.fields) params.fields = opts.fields;
     return params;
   }
@@ -212,7 +236,8 @@ export class QobrixClient {
       related_id: opts.related_id,
     };
 
-    if (opts.sort) params.sort = opts.sort;
+    const sort = normalizeSort(opts.sort);
+    if (sort) params.sort = sort;
     if (opts.fields) params.fields = opts.fields;
     if (opts.include) params.include = opts.include;
 

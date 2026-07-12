@@ -78,7 +78,12 @@ const paginationParams = {
 
 const sortParam = {
   sort: z.string().optional()
-    .describe("Sort by field name. Prefix with - for descending. Examples: '-created' (newest first), 'name' (alphabetical), '-list_selling_price_amount' (highest price first)."),
+    .describe(
+      "Sort by field name (maps to Qobrix OpenAPI sort[]). Prefix with - for descending. " +
+      "Comma-separated for multi-key (e.g. '-list_selling_price_amount,-created'). " +
+      "Examples: '-created' (newest first), 'name' (alphabetical), " +
+      "'-list_selling_price_amount' (highest list price first)."
+    ),
 };
 
 const fieldsParam = {
@@ -539,9 +544,10 @@ export const TopValuesSchema = z.object({
 export const TopRecordsSchema = z.object({
   resource: z.string().describe(RESOURCE_DESCRIPTION),
   sort_by: z.string().describe(
-    "Field to sort by (numeric or ISO date). Pages through results and sorts in-process — " +
-    "use this when the list/search 'sort' param is silently ignored by the Qobrix API " +
-    "(common for nullable/computed numeric fields like contracts.final_selling_price_amount)."
+    "Field to sort by (numeric or ISO date). Pages through matching rows and sorts in-process. " +
+    "Prefer list/search `sort='-field'` for a single page. Use this for full-dataset top-N, " +
+    "or when server-side sort returns no rows on a nullable/computed field " +
+    "(e.g. opportunities.budget)."
   ),
   desc: z.boolean().optional().describe("Sort descending (default true)."),
   top: z.number().min(1).max(50).optional().describe(
