@@ -268,17 +268,27 @@ This project is the **freemium PLG channel**: clone it, run Mode A or B, and put
 |------|----------------|------|------------------------|
 | **A** (default) | Yes | `QOBRIX_MCP_TRANSPORT=stdio` (or unset) | Shared `QOBRIX_API_*` from process env |
 | **B** | Yes | `TRANSPORT=http` + `QOBRIX_MCP_AUTH=headers` | Per-request `X-Api-User` / `X-Api-Key` (trusted callers; bind localhost) |
-| **C** | **Enterprise** | `TRANSPORT=http` + `QOBRIX_MCP_AUTH=oauth` | OAuth 2.1 bearer from the **Enterprise OAuth solution** only |
+| **C** | **Enterprise** | `TRANSPORT=http` + `QOBRIX_MCP_AUTH=oauth` | Self-service OAuth: MCP returns a `/connect` URL; user signs in at the **Enterprise OAuth solution**; this server holds the session |
 
-Mode A and B are fully supported out of this package. Mode C is the upgrade path for multi-user, per-agent identity.
+Mode A and B are fully supported out of this package. Mode C is the upgrade path for user-authenticated CRM access without northbound client OAuth wiring.
 
 ### Enterprise OAuth
 
-**Need every agent to authenticate as themselves — not a shared API key?** Mode C is designed for that. It requires SharpSir’s **Enterprise OAuth solution**: a hosted Authorization Server bundle (login + 2FA + consent, per-user API-key minting, encrypted credential vault, audience-bound tokens) that pairs exclusively with this MCP server.
+**Need the agent to work as a signed-in Qobrix user — not a shared API key?** Mode C is designed for that. It requires SharpSir’s **Enterprise OAuth solution**: a hosted Authorization Server bundle (login + 2FA + consent, per-user API-key minting, encrypted credential vault, audience-bound tokens) that pairs exclusively with this MCP server.
+
+How Mode C works (MCP self-auth — northbound clients unchanged):
+
+1. A tool runs with no session → the MCP returns an authorization URL:
+   - **URL-mode elicitation** (`JSON-RPC -32042`) when the client supports `elicitation.url` (Claude, Cursor, etc.)
+   - **Plain tool-result text** with the same `/connect` link for clients without elicitation (e.g. ragchat / LangChain) — the LLM relays it to the user
+2. The user opens **`/connect`** on this server (anti-phishing indirection) → signed cookie + redirect to the Enterprise OAuth login page
+3. After login + 2FA + consent, the AS redirects to **`/oauth/callback`**; this MCP exchanges the code (PKCE), introspects for Qobrix credentials, and stores them in an **encrypted session vault**
+4. The next tool call runs authenticated. On Qobrix `401`/`403`, the vault is cleared and a fresh `/connect` URL is returned
 
 - Not available as a public download and **not** something you can clone from GitHub.
 - Delivered and configured by our team **upon request** as an enterprise solution bundle.
 - No third-party OAuth servers — Mode C is hard-wired to this Enterprise OAuth solution only.
+- **Security:** Mode C uses a **single shared session** and leaves `/mcp` without a client bearer. Bind `QOBRIX_MCP_HOST=127.0.0.1` (or a trusted network) so only intended callers can use the vault.
 
 **Ready to upgrade?** Contact [SharpSir Group](https://sharpsir.group) · [dev@sharpsir.group](mailto:dev@sharpsir.group) and ask for the **Qobrix CRM MCP Enterprise OAuth** bundle.
 
@@ -287,19 +297,24 @@ Once delivered, you point this server at the issuer you receive:
 ```bash
 export QOBRIX_MCP_TRANSPORT=http
 export QOBRIX_MCP_AUTH=oauth
+export QOBRIX_MCP_HOST=127.0.0.1
 export QOBRIX_MCP_PORT=3502
+export QOBRIX_MCP_PUBLIC_URL=http://127.0.0.1:3502
+export QOBRIX_MCP_RESOURCE_URL=http://127.0.0.1:3502/mcp
 export QOBRIX_OAUTH_ISSUER=<issuer-from-enterprise-bundle>
-export QOBRIX_MCP_RESOURCE_URL=<your-public-mcp-url>/mcp
 export QOBRIX_OAUTH_INTROSPECTION_SECRET=<shared-secret-from-bundle>
+export QOBRIX_MCP_STATE_SECRET=<16+-char-secret>
 npm start
 ```
 
-Discovery endpoints (Mode C, after the Enterprise OAuth solution is paired):
+Mode C endpoints (after the Enterprise OAuth solution is paired):
 
-- `/.well-known/oauth-protected-resource` (RFC 9728) — lists `authorization_servers: [QOBRIX_OAUTH_ISSUER]`
-- Unauthenticated `/mcp` → `401` + `WWW-Authenticate: Bearer resource_metadata=...`
+- `GET /connect?e=…` — start authorization (sets cookie, 302 to AS)
+- `GET /oauth/callback` — PKCE code exchange + session vault write
+- `GET /health` — includes `connected: true|false` for the session vault
+- Unauthenticated `/mcp` is intentional: tools surface the connect URL when needed
 
-Register the remote MCP URL (`…/mcp`) in Claude / Cursor / ChatGPT; the client completes DCR + PKCE against the Enterprise OAuth login page.
+Register the remote MCP URL (`…/mcp`) in Claude / Cursor / ChatGPT / ragchat as a normal Streamable HTTP server (**no client-side OAuth provider required**). The MCP handles auth itself.
 
 ### Caching
 
@@ -627,7 +642,13 @@ npm run test:all
 ```
 src/
 ├── index.ts          # MCP server entry point + RESO workflow instructions
+├── http.ts           # Streamable HTTP transport (Modes B / C)
+├── modes.ts          # Auth mode resolution (env / headers / oauth)
 ├── client.ts         # QobrixClient — HTTP + read-through response cache
+├── auth-context.ts   # AsyncLocalStorage per-request credentials
+├── oauth-client.ts   # Mode C self-service OAuth client + session vault
+├── oauth-rs.ts       # Companion AS metadata + introspection helpers
+├── request-context.ts# ALS for McpServer (elicitation capability detection)
 ├── cache.ts          # LRU memory tier, optional Redis, single-flight coalescing
 ├── relevance.ts      # Boost scoring + cached candidate pager for search
 ├── search-dsl.ts     # Full SearchExpression DSL reference + field cheatsheets
@@ -660,7 +681,8 @@ test-suite/
 ├── workflows.test.mjs    # RESO workflow coverage
 ├── cache.test.mjs        # Cache unit tests (incl. search-page keys)
 ├── relevance.test.mjs    # Boost scoring + DSL help unit tests
-└── format.test.mjs       # Output-cap / truncation tests
+├── format.test.mjs       # Output-cap / truncation tests
+└── oauth-modes.test.mjs  # Mode B/C auth smoke tests
 ```
 
 ### How the LLM Learns
@@ -685,7 +707,7 @@ The server teaches the LLM at three levels:
 | Validation | Zod 3.24 |
 | Optional cache | `redis` 4.x (node-redis) when `QOBRIX_REDIS_URL` is set |
 | Transport | stdio (default) · Streamable HTTP (Modes B / C) |
-| API Auth | Mode A/B: `X-Api-User` + `X-Api-Key` · Mode C: Enterprise OAuth (upon request) |
+| API Auth | Mode A/B: `X-Api-User` + `X-Api-Key` · Mode C: self-service Enterprise OAuth (`/connect` URL) |
 | Testing | Node.js built-in test runner (`node:test`) |
 
 ### License

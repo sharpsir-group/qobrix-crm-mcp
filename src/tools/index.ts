@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { UrlElicitationRequiredError } from "@modelcontextprotocol/sdk/types.js";
 import { registerPropertyTools } from "./properties.js";
 import { registerContactTools } from "./contacts.js";
 import { registerAgentTools } from "./agents.js";
@@ -19,6 +20,11 @@ import { registerProductivityTools } from "./productivity.js";
 import { registerCustomerTools } from "./customers.js";
 import { registerCacheTools } from "./cache.js";
 import { registerAuditTools } from "./audit.js";
+import { AuthRequiredError, registerElicitationNotifier } from "../oauth-client.js";
+import {
+  clientSupportsUrlElicitation,
+  getRequestMcpServer,
+} from "../request-context.js";
 
 // Hard cap on tool result size, in characters of the rendered JSON text.
 // Default 30 000 chars ≈ 7.5 K tokens, which keeps a multi-tool turn well under
@@ -134,6 +140,56 @@ export function formatResult(data: unknown) {
 }
 
 export function errorResult(error: unknown) {
+  // Let the SDK convert this to JSON-RPC -32042 for elicitation-capable clients.
+  if (error instanceof UrlElicitationRequiredError) {
+    throw error;
+  }
+
+  if (error instanceof AuthRequiredError) {
+    if (clientSupportsUrlElicitation()) {
+      const mcp = getRequestMcpServer();
+      if (mcp) {
+        try {
+          const notifier = mcp.server.createElicitationCompletionNotifier(
+            error.elicitationId
+          );
+          registerElicitationNotifier(error.elicitationId, notifier);
+        } catch {
+          // Client may not support the notification path; URL still works.
+        }
+      }
+      throw new UrlElicitationRequiredError(
+        [
+          {
+            mode: "url",
+            elicitationId: error.elicitationId,
+            url: error.connectUrl,
+            message:
+              "Qobrix authorization is required. Open the link to sign in with your Qobrix account.",
+          },
+        ],
+        "Qobrix authorization required"
+      );
+    }
+
+    // Fallback for clients without elicitation (ragchat / LangChain): plain
+    // tool-result text the LLM relays to the user. isError:false so the model
+    // does not treat it as a hard failure to retry blindly.
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text:
+            "Qobrix needs authorization before this tool can run.\n\n" +
+            "Ask the user to open this link to sign in (login + 2FA + consent):\n\n" +
+            `${error.connectUrl}\n\n` +
+            "After they finish, retry the same request — the MCP will use their Qobrix credentials.",
+        },
+      ],
+      isError: false as const,
+    };
+  }
+
   const message =
     error instanceof Error ? error.message : "An unknown error occurred";
   return {

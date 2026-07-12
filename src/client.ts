@@ -12,6 +12,14 @@ import {
   credentialFingerprint,
   type AuthCredentials,
 } from "./auth-context.js";
+import { resolveAuthMode } from "./modes.js";
+import {
+  AuthRequiredError,
+  beginConnect,
+  clearSession,
+} from "./oauth-client.js";
+
+export { AuthRequiredError } from "./oauth-client.js";
 
 export type QobrixClientOptions = {
   apiUrl: string;
@@ -157,6 +165,20 @@ export class QobrixClient {
     });
 
     if (!response.ok) {
+      // Mode C: expired / revoked Qobrix keys → clear vault and re-prompt connect.
+      if (
+        (response.status === 401 || response.status === 403) &&
+        resolveAuthMode() === "oauth"
+      ) {
+        clearSession();
+        const { elicitationId, connectUrl } = beginConnect();
+        throw new AuthRequiredError({
+          elicitationId,
+          connectUrl,
+          message:
+            "Qobrix session expired or was revoked. Open the connect URL to sign in again.",
+        });
+      }
       let errorBody: string;
       try {
         const errJson = (await response.json()) as QobrixErrorResponse;
@@ -245,6 +267,7 @@ function touchLru(fp: string, client: QobrixClient): QobrixClient {
 
 /**
  * Prefer AsyncLocalStorage credentials (Modes B/C); fall back to process.env (Mode A).
+ * Mode C without a session vault entry throws AuthRequiredError (connect URL).
  */
 export function getClient(): QobrixClient {
   const ctx = getAuthContext();
@@ -255,6 +278,10 @@ export function getClient(): QobrixClient {
     return touchLru(tmp.fingerprint, tmp);
   }
   if (!_envFallbackEnabled) {
+    if (resolveAuthMode() === "oauth") {
+      const { elicitationId, connectUrl } = beginConnect();
+      throw new AuthRequiredError({ elicitationId, connectUrl });
+    }
     throw new Error(
       "No per-request Qobrix credentials in scope and env fallback is disabled (Mode B/C)"
     );

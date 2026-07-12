@@ -3,15 +3,19 @@
  *
  * A — stdio + env shared key (default, local/single-tenant).
  * B — HTTP + per-request X-Api-User / X-Api-Key (trusted callers, localhost).
- * C — HTTP + OAuth 2.1 resource server paired ONLY with qobrix-crm-mcp-oauth.
+ * C — HTTP + self-service OAuth client paired ONLY with qobrix-crm-mcp-oauth.
+ *     The MCP obtains Qobrix credentials via third-party authorization
+ *     (URL-mode elicitation / tool-result URL + /connect → AS login).
+ *     Northbound MCP clients need no bearer token.
  *
  * Trust boundaries:
  * - A: process owner controls env secrets; one shared Qobrix identity.
  * - B: caller is trusted (same host / private network); credentials are
  *   request-scoped and must never be logged. Bind to 127.0.0.1 by default.
- * - C: end-user authenticates at qobrix-crm-mcp-oauth; this server validates
- *   audience-bound bearer tokens and resolves per-user Qobrix API keys via
- *   introspection. No third-party authorization servers.
+ * - C: MCP is the OAuth client + session holder. End-user authenticates at
+ *   qobrix-crm-mcp-oauth; this server stores Qobrix API keys in an encrypted
+ *   session vault. Single shared session — pin /mcp to loopback / trusted net.
+ *   No third-party authorization servers.
  */
 
 export type AuthMode = "env" | "headers" | "oauth";
@@ -45,6 +49,6 @@ export function modeDescription(mode: AuthMode): string {
     case "headers":
       return "Mode B: per-request X-Api-User / X-Api-Key (trusted callers)";
     case "oauth":
-      return "Mode C: OAuth 2.1 RS paired with qobrix-crm-mcp-oauth";
+      return "Mode C: self-service OAuth client paired with qobrix-crm-mcp-oauth (auth URL via elicitation / tool result)";
   }
 }

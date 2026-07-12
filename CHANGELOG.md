@@ -7,6 +7,47 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ---
 
+## [1.4.0] - 2026-07-12
+
+### Mode C self-service OAuth (standards-verified third-party auth)
+
+Mode C no longer requires the northbound MCP client to carry a bearer token.
+The MCP is its own OAuth client + session holder against SharpSir’s **Enterprise
+OAuth** solution (`qobrix-crm-mcp-oauth`).
+
+When a tool needs auth:
+
+1. **Elicitation-capable clients** receive `URLElicitationRequiredError` (`-32042`)
+   with a `/connect` URL (SEP-1036 / MCP 2025-11-25).
+2. **Other clients** (ragchat / LangChain) receive plain tool-result text with the
+   same URL — the LLM relays it; no host code changes.
+3. User opens **`/connect`** (RS-hosted anti-phishing indirection + signed cookie)
+   → Enterprise OAuth login → **`/oauth/callback`** → encrypted session vault.
+4. Retry runs authenticated. Qobrix `401`/`403` clears the vault and re-prompts.
+
+### Added
+
+- `src/oauth-client.ts` — DCR, PKCE, `/connect` state, token exchange, introspection,
+  AES-256-GCM session vault, refresh.
+- `GET /connect` and `GET /oauth/callback` HTTP routes.
+- `AuthRequiredError` + client-aware `errorResult()` (elicitation vs text fallback).
+- `src/request-context.ts` — ALS for `McpServer` (capability detection + completion notify).
+- Env: `QOBRIX_MCP_PUBLIC_URL`, `QOBRIX_MCP_STATE_SECRET`, `QOBRIX_MCP_DATA_DIR`.
+
+### Changed
+
+- Mode C drops `requireBearerAuth` / PRM on `/mcp` (client→server auth optional;
+  network trust is the boundary — bind loopback).
+- Mode description and docs reframed around self-service third-party authorization.
+
+### Security
+
+- Single shared session vault (document + warn on non-loopback bind).
+- Connect state is single-use with ~10 min TTL; cookie↔state binding on callback.
+- Exact-match `redirect_uri` enforced by the paired AS.
+
+---
+
 ## [1.3.0] - 2026-07-12
 
 ### Agent-agnostic auth — Streamable HTTP + Modes A / B / C (freemium PLG)
