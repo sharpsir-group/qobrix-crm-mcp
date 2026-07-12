@@ -55,6 +55,8 @@ const boostParam = {
   ),
   max_scan: z.number().min(1).max(500).optional().describe(
     "Candidate pool size when boost is set (default 100, hard cap 500). " +
+    "When expand=true or media=true the effective scan is capped at 100 " +
+    "(pagination.scan_capped_reason='expand/media') to keep latency and payload size safe. " +
     "Higher improves recall (less chance of missing a good listing) but costs more API pages. " +
     "Ignored on the fast path (no boost). Each scanned page is response-cached."
   ),

@@ -223,7 +223,7 @@ Automated smoke: `npm run test:oauth-modes`.
 
 - Caching: [README — Caching](../README.md#caching). Defaults: in-memory LRU; set `QOBRIX_REDIS_URL` for shared Redis. Related: `QOBRIX_CACHE_ENABLED`, `QOBRIX_CACHE_TTL`, `QOBRIX_CACHE_MAX_ENTRIES`, `QOBRIX_REDIS_KEY_PREFIX`.
 - Rate limit: `QOBRIX_MCP_RATE_LIMIT` (default `300` req/min). Mode C also rate-limits `/connect` and `/oauth/callback` (`QOBRIX_MCP_OAUTH_RATE_LIMIT`, default `30`).
-- Output cap: `QOBRIX_MCP_MAX_RESULT_CHARS` (see README).
+- Output cap: `QOBRIX_MCP_MAX_RESULT_CHARS` (default 30 000). Oversized results compact nested expand/media fields or return `status: "result_too_large"` with `_refine_required` so the agent asks the user to narrow the query. See README “Output cap”. `QOBRIX_MCP_REFINE_MULTIPLIER` (default 8) controls when refine escalates.
 
 ---
 

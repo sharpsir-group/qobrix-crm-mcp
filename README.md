@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Connect Claude, Cursor, and other MCP clients to your Qobrix real-estate CRM</strong> — listings, leads, viewings, offers, contracts, and activity in one read-only <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> layer.<br />
-  <strong>64 tools</strong> (CRM entities + AI relevance search + analytics + audit + cache controls + session/identity), <a href="https://www.reso.org/data-dictionary/">RESO Data Dictionary 2.0</a> workflows, optional <strong>Redis-backed response caching</strong>, <strong>three auth modes</strong> (stdio / headers / OAuth 2.1), and <strong>217 automated tests</strong>.
+  <strong>64 tools</strong> (CRM entities + AI relevance search + analytics + audit + cache controls + session/identity), <a href="https://www.reso.org/data-dictionary/">RESO Data Dictionary 2.0</a> workflows, optional <strong>Redis-backed response caching</strong>, <strong>three auth modes</strong> (stdio / headers / OAuth 2.1), and <strong>219 automated tests</strong>.
 </p>
 
 <p align="center">
@@ -594,22 +594,26 @@ This change typically shrinks `qobrix_list_properties({ limit: 10 })` from ~300 
 
 Every tool result is capped at `QOBRIX_MCP_MAX_RESULT_CHARS` characters of rendered JSON (default **30 000**, roughly 7.5 K tokens). Behaviour:
 
-- **Paginated payloads** (`{ data: [...], pagination: {...} }`): truncated to the largest prefix of `data[]` that fits, and a `_truncated` block is attached with `kept_rows`, `omitted_rows`, `original_chars`, `max_chars`, and a `hint` telling the LLM how to scope the next call.
-- **Non-paginated payloads** (single `get`, custom analytic shapes): the JSON is clipped at the cap and a `QOBRIX_MCP TRUNCATED` trailer is appended with the same guidance.
+- **Paginated payloads** (`{ data: [...], pagination: {...} }`): truncated to the largest prefix of `data[]` that fits, and a `_truncated` block is attached with `kept_rows`, `omitted_rows`, `original_chars`, `max_chars`, and a `hint` telling the LLM how to scope the next call. If nested expand/media objects alone blow the cap, rows are **compacted to scalars** (`_truncated.compacted: true`) so at least one usable row is returned.
+- **Grossly oversized** (default: original size `> 8 ×` the cap, override `QOBRIX_MCP_REFINE_MULTIPLIER`): returns `status: "result_too_large"` with `_refine_required` (assistant instruction + suggested narrowing + small `returned_sample`) so the LLM asks the user to reformulate — not dump.
+- **Non-paginated payloads** (single `get`, custom analytic shapes): the JSON is clipped at the cap and a `QOBRIX_MCP TRUNCATED` trailer is appended (or the same refine directive when grossly oversized).
 
-Override the cap with the env var (set to `0` to disable, not recommended in production):
+When `boost` is used with `expand=true` or `media=true`, `max_scan` is auto-capped at **100** and `pagination.scan_capped_reason` may be `"expand/media"`.
+
+Override the cap / refine threshold:
 
 ```bash
 QOBRIX_MCP_MAX_RESULT_CHARS=60000
+QOBRIX_MCP_REFINE_MULTIPLIER=8
 ```
 
-If you regularly hit the cap, that's a signal to use `fields[]` (whitelist columns), a tighter `search` expression, a smaller `limit`, or keep `expand=false` / `media=false`.
+If you regularly hit the cap or refine guard, use `fields[]` (whitelist columns), a tighter `search` expression, a smaller `limit`, or keep `expand=false` / `media=false`.
 
 ---
 
 ### Testing
 
-The project includes **217 automated tests** across **61** `describe` suites (integration, multi-step scenarios, RESO workflows, cache, relevance, output-cap, and OAuth mode smoke):
+The project includes **219 automated tests** across **61** `describe` suites (integration, multi-step scenarios, RESO workflows, cache, relevance, output-cap, and OAuth mode smoke):
 
 ```bash
 # Integration tests — individual tool mechanics
@@ -644,7 +648,7 @@ npm run test:all
 | Workflows | 39 | Listing lifecycle, lead funnel, sales pipeline, showing, transaction, media, activity, schema |
 | Cache | 22 | Read-through cache, single-flight coalescing, LRU eviction, key canonicalization, search-page keys (no live API) |
 | Relevance | 23 | Boost eval/score/rank (incl. opportunity/contact shapes), fields[]+boost union, DSL help text, search cache-key stability (no live API) |
-| Format | 5 | `formatResult` output cap, paginated truncation with `_truncated` marker, fallback trailer, env override (no live API) |
+| Format | 7 | `formatResult` output cap, paginated truncation, expand/media compaction (`kept_rows>=1`), `result_too_large` refine guard, fallback trailer, env override (no live API) |
 | OAuth modes | 3 | Mode B without headers, Mode C `/mcp` without bearer, elicitation `/connect` URL |
 
 ---

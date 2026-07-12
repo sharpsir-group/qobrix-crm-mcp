@@ -94,7 +94,7 @@ Every search tool supports the two-tier recipe (properties, projects, contacts, 
 1. search = hard must-haves (server DSL filter → precision).
 2. boost[] = soft weighted nice-to-haves scored over up to max_scan candidates (recall + ranking). Each row gets _relevance and _matched.
 3. limit = how many ranked results to return (default 10, max 100).
-4. max_scan = candidate pool when boosting (default 100, hard cap 500). Higher = better recall, more cached API pages.
+4. max_scan = candidate pool when boosting (default 100, hard cap 500; auto-capped at 100 when expand or media is true — see pagination.scan_capped_reason). Higher = better recall, more cached API pages.
 Without boost → fast path (single cached list page). All list/search pages share QOBRIX_CACHE_TTL (default 300s); refresh with qobrix_cache_clear({prefix:'v1:request:properties'}).
 
 ## Lead <-> listing matching via search (2-way)
@@ -112,7 +112,7 @@ List / search / get tools default to compact payloads:
 Override per call only when you actually need the heavier payload: pass expand=true and/or media=true. Prefer include[] for surgical expansion of specific associations.
 
 ## Output cap
-Every tool result is capped at QOBRIX_MCP_MAX_RESULT_CHARS chars of rendered JSON (default 30,000 ≈ ~7.5 K tokens). When a paginated payload exceeds the cap it is truncated to the largest prefix of data[] that fits and a "_truncated" block is attached describing kept_rows / omitted_rows and a hint. When a non-paginated payload exceeds the cap, the JSON is clipped and a "QOBRIX_MCP TRUNCATED" trailer is appended. If you see truncation, scope the next call (smaller limit, fields[] whitelist, tighter search, drop expand/media).
+Every tool result is capped at QOBRIX_MCP_MAX_RESULT_CHARS chars of rendered JSON (default 30,000 ≈ ~7.5 K tokens). When a paginated payload exceeds the cap it is truncated to the largest prefix of data[] that fits (rows may be compacted to scalars if nested expand/media objects alone blow the cap) and a "_truncated" block is attached. When the payload is grossly oversized (default: >8× the cap, override QOBRIX_MCP_REFINE_MULTIPLIER) or compaction still cannot fit a usable page, the tool returns status="result_too_large" with _refine_required — tell the user to narrow the query (filters, fields[], smaller limit, drop expand/media) and retry. Do not dump or invent rows.
 
 ## Discovering field names
 Call qobrix_search_dsl_help for search grammar, or qobrix_get_schema with the resource name (e.g. 'Properties', 'Contacts', 'Opportunities') to discover all fields, types, and validation rules. Use qobrix_get_field_options for enum values.
@@ -146,7 +146,7 @@ export function createServer(): McpServer {
   const server = new McpServer(
     {
       name: "qobrix-crm-mcp",
-      version: "1.5.0",
+      version: "1.5.1",
     },
     {
       instructions: SERVER_INSTRUCTIONS,

@@ -86,6 +86,9 @@ export function registerPropertyTools(server: McpServer): void {
     "Demand match: search='status == \"available\" and sale_rent == \"for_sale\"', " +
     "boost=[{field:'sea_view',op:'==',value:true,weight:3},{field:'bedrooms',op:'>=',value:3,weight:2}," +
     "{field:'list_selling_price_amount',op:'in',value:'200000..600000',weight:2}], limit=15, max_scan=200. " +
+    "PAYLOAD: keep expand=false / media=false for search; when either is true, max_scan is auto-capped at 100. " +
+    "If a result returns status='result_too_large' with _refine_required, ask the user to narrow the query " +
+    "(filters, fields[], smaller limit, drop expand/media) then retry. " +
     "All upstream pages are response-cached (QOBRIX_CACHE_TTL, default 300s).",
     SearchPropertiesSchema.shape,
     async ({ search, boost, max_scan, limit, page, sort, fields, media, expand }) => {

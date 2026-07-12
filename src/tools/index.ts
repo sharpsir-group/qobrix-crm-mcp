@@ -39,6 +39,19 @@ function getMaxResultChars(): number {
   return n;
 }
 
+// When original payload is this many times larger than the cap (or compaction
+// still cannot fit a usable page), return a refine directive instead of a
+// truncated dump. Override with QOBRIX_MCP_REFINE_MULTIPLIER.
+function getRefineMultiplier(): number {
+  const raw = process.env.QOBRIX_MCP_REFINE_MULTIPLIER;
+  if (raw === undefined) return 8;
+  const n = Number.parseFloat(raw);
+  if (!Number.isFinite(n) || n < 1) return 8;
+  return n;
+}
+
+const SAMPLE_ROWS = 5;
+
 function isPaginatedListPayload(
   data: unknown
 ): data is { data: unknown[]; pagination?: Record<string, unknown>; [k: string]: unknown } {
@@ -47,6 +60,107 @@ function isPaginatedListPayload(
     data !== null &&
     Array.isArray((data as { data?: unknown }).data)
   );
+}
+
+/** Drop nested objects/arrays (expand FK blobs, media arrays); keep scalars. */
+export function compactRow(row: unknown): unknown {
+  if (row === null || typeof row !== "object" || Array.isArray(row)) {
+    return row;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row as Record<string, unknown>)) {
+    if (v !== null && typeof v === "object") continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** Compact + clip long strings so refine samples stay under the output cap. */
+function compactSampleRow(row: unknown, maxString = 80): unknown {
+  const compacted = compactRow(row);
+  if (
+    compacted === null ||
+    typeof compacted !== "object" ||
+    Array.isArray(compacted)
+  ) {
+    return compacted;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(compacted as Record<string, unknown>)) {
+    if (typeof v === "string" && v.length > maxString) {
+      out[k] = v.slice(0, maxString) + "…";
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function largestFittingPrefix(
+  rows: unknown[],
+  buildEnvelope: (kept: unknown[]) => unknown,
+  max: number
+): number {
+  let lo = 0;
+  let hi = rows.length;
+  let best = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const candidate = JSON.stringify(buildEnvelope(rows.slice(0, mid)), null, 2);
+    if (candidate.length <= max) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best;
+}
+
+function matchedEstimate(
+  data: { data: unknown[]; pagination?: Record<string, unknown> },
+  total: number
+): number {
+  const pag = data.pagination;
+  if (pag && typeof pag.count === "number" && Number.isFinite(pag.count)) {
+    return pag.count as number;
+  }
+  if (pag && typeof pag.scanned === "number" && Number.isFinite(pag.scanned)) {
+    return pag.scanned as number;
+  }
+  return total;
+}
+
+function buildRefineEnvelope(
+  data: { data: unknown[]; pagination?: Record<string, unknown>; [k: string]: unknown },
+  sampleRows: unknown[],
+  originalChars: number,
+  max: number,
+  reason: string
+) {
+  const total = data.data.length;
+  return {
+    status: "result_too_large",
+    matched_estimate: matchedEstimate(data, total),
+    returned_sample: sampleRows,
+    _refine_required: {
+      reason,
+      assistant_instruction:
+        "Do NOT dump this payload or invent missing rows. Tell the user the " +
+        "query matched too many or too-large records for a single reply, ask " +
+        "them to narrow it (filters, fields, smaller limit, no expand/media), " +
+        "then retry with the tightened request.",
+      suggested_narrowing: [
+        "add filters (location, price range, status, bedrooms, listing type)",
+        "request specific fields[] instead of expand=true",
+        "set media=false and expand=false",
+        "reduce limit (e.g. 10-20)",
+      ],
+      original_chars: originalChars,
+      max_chars: max,
+      total_rows_in_page: total,
+    },
+  };
 }
 
 export function formatResult(data: unknown) {
@@ -65,6 +179,8 @@ export function formatResult(data: unknown) {
   }
 
   const originalChars = fullText.length;
+  const refineMultiplier = getRefineMultiplier();
+  const grosslyOversized = originalChars > refineMultiplier * max;
 
   // Smart truncation for paginated/list-shaped payloads: keep the largest
   // prefix of `data.data` that fits, attach a `_truncated` marker so the
@@ -73,7 +189,10 @@ export function formatResult(data: unknown) {
     const rows = data.data;
     const total = rows.length;
 
-    const buildEnvelope = (kept: unknown[]) => {
+    const buildEnvelope = (
+      kept: unknown[],
+      extra?: { compacted?: boolean }
+    ) => {
       const omitted = total - kept.length;
       return {
         ...data,
@@ -84,6 +203,7 @@ export function formatResult(data: unknown) {
           total_rows_in_page: total,
           original_chars: originalChars,
           max_chars: max,
+          ...(extra?.compacted ? { compacted: true as const } : {}),
           hint:
             "Result truncated to fit MCP output cap. To get more rows per call, " +
             "pass fields[] to whitelist the columns you actually need, reduce " +
@@ -93,22 +213,74 @@ export function formatResult(data: unknown) {
       };
     };
 
-    // Binary search for the largest prefix that fits.
-    let lo = 0;
-    let hi = total;
-    let best = 0;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      const candidate = JSON.stringify(buildEnvelope(rows.slice(0, mid)), null, 2);
-      if (candidate.length <= max) {
-        best = mid;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
+    let workingRows = rows;
+    let compacted = false;
+    let best = largestFittingPrefix(
+      workingRows,
+      (kept) => buildEnvelope(kept),
+      max
+    );
+
+    // Fix 1: truncation cliff — every expanded/media row exceeds the cap alone.
+    // Re-render scalar-only and retry; always keep >= 1 row when total > 0.
+    if (best === 0 && total > 0) {
+      workingRows = rows.map(compactRow);
+      compacted = true;
+      best = largestFittingPrefix(
+        workingRows,
+        (kept) => buildEnvelope(kept, { compacted: true }),
+        max
+      );
+      if (best === 0) {
+        best = 1;
       }
     }
 
-    const text = JSON.stringify(buildEnvelope(rows.slice(0, best)), null, 2);
+    // Fix 1b: grossly oversized or compaction still cannot produce a usable page.
+    const compactionUnusable = compacted && best <= 1 && total > 1;
+    if (grosslyOversized || compactionUnusable) {
+      const sample = rows.slice(0, SAMPLE_ROWS).map((r) => compactSampleRow(r));
+      const reason = grosslyOversized
+        ? "Payload far larger than the MCP output cap (expand/media or a broad query)."
+        : "Even after compacting nested expand/media fields, only a tiny page fits the cap.";
+      const envelope = buildRefineEnvelope(
+        data,
+        sample,
+        originalChars,
+        max,
+        reason
+      );
+      let text = JSON.stringify(envelope, null, 2);
+      // Guarantee the refine envelope itself stays under the cap.
+      if (text.length > max) {
+        for (const n of [3, 2, 1, 0]) {
+          const tighter = buildRefineEnvelope(
+            data,
+            sample.slice(0, n),
+            originalChars,
+            max,
+            reason
+          );
+          text = JSON.stringify(tighter, null, 2);
+          if (text.length <= max) break;
+        }
+      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text,
+          },
+        ],
+        isError: false as const,
+      };
+    }
+
+    const text = JSON.stringify(
+      buildEnvelope(workingRows.slice(0, best), compacted ? { compacted: true } : undefined),
+      null,
+      2
+    );
     return {
       content: [
         {
@@ -116,6 +288,40 @@ export function formatResult(data: unknown) {
           text,
         },
       ],
+    };
+  }
+
+  // Grossly oversized non-paginated payloads → refine directive (no dump).
+  if (grosslyOversized) {
+    const text = JSON.stringify(
+      {
+        status: "result_too_large",
+        _refine_required: {
+          reason:
+            "Single-object payload far larger than the MCP output cap.",
+          assistant_instruction:
+            "Do NOT dump this. Tell the user the record is too large for one reply " +
+            "and ask them to narrow (fields[] / include[], drop expand/media), then retry.",
+          suggested_narrowing: [
+            "request specific fields[] or include[]",
+            "set media=false and expand=false",
+            "fetch related entities with a dedicated get/list tool",
+          ],
+          original_chars: originalChars,
+          max_chars: max,
+        },
+      },
+      null,
+      2
+    );
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text,
+        },
+      ],
+      isError: false as const,
     };
   }
 

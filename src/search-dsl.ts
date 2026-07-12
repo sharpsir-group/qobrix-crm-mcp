@@ -109,8 +109,12 @@ Applies to properties, projects, contacts, agents, opportunities, viewings, task
 1. Put **must-have** constraints in \`search\` (hard filter → precision).
 2. Put **nice-to-haves** in \`boost[]\` (soft weighted criteria → recall + ranking).
 3. Set \`limit\` to how many ranked results to return (default 10, max 100).
-4. Set \`max_scan\` to how many candidates to score (default 100 with boost, hard cap 500).
+4. Set \`max_scan\` to how many candidates to score (default 100 with boost, hard cap 500;
+   when \`expand=true\` or \`media=true\` the effective cap is 100).
    Higher \`max_scan\` improves recall; higher \`limit\` returns more of the ranked set.
+5. Prefer compact payloads (\`expand=false\`, \`media=false\`, \`fields[]\`). If a tool returns
+   \`status: "result_too_large"\` with \`_refine_required\`, ask the user to narrow the query
+   then retry — do not dump or invent rows.
 
 ### Lead <-> listing matching via search
 

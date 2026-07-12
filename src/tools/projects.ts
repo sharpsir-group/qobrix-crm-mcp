@@ -64,6 +64,8 @@ export function registerProjectTools(server: McpServer): void {
     "boost=[{field:'starting_price_from',op:'<=',value:400000,weight:2}," +
     "{field:'construction_stage',op:'==',value:'under_construction',weight:1}], " +
     "limit=10, max_scan=150. " +
+    "When expand=true or media=true, max_scan is auto-capped at 100. " +
+    "If status='result_too_large' with _refine_required, ask the user to narrow then retry. " +
     "All upstream pages are response-cached.",
     SearchProjectsSchema.shape,
     async ({ search, boost, max_scan, limit, page, sort, fields, media, expand }) => {

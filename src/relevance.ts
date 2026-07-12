@@ -57,6 +57,8 @@ export type RelevanceSearchOpts = {
 
 const PAGE_SIZE = 100;
 const HARD_CAP_SCAN = 500;
+/** When expand or media is on, each candidate page is heavy — keep the pool small. */
+const EXPENSIVE_MAX_SCAN = 100;
 const DEFAULT_LIMIT = 10;
 const DEFAULT_MAX_SCAN_WITH_BOOST = 100;
 
@@ -271,10 +273,17 @@ export async function relevanceSearch(
     };
   }
 
-  const maxScan = Math.min(
-    Math.max(limit, opts.max_scan ?? DEFAULT_MAX_SCAN_WITH_BOOST),
-    HARD_CAP_SCAN
+  const expensive = Boolean(opts.media || opts.expand);
+  const scanCap = expensive ? EXPENSIVE_MAX_SCAN : HARD_CAP_SCAN;
+  const requestedScan = Math.max(
+    limit,
+    opts.max_scan ?? DEFAULT_MAX_SCAN_WITH_BOOST
   );
+  const maxScan = Math.min(requestedScan, scanCap);
+  const scanCappedReason =
+    expensive && requestedScan > EXPENSIVE_MAX_SCAN
+      ? ("expand/media" as const)
+      : undefined;
 
   const { rows, scanned, pages } = await collectCandidates(opts.resource, {
     search: opts.search,
@@ -316,6 +325,9 @@ export async function relevanceSearch(
       scanned,
       pages_fetched: pages,
       max_scan: maxScan,
+      ...(scanCappedReason
+        ? { scan_capped_reason: scanCappedReason }
+        : {}),
       boost_count: boost.length,
       mode: "ranked",
     },

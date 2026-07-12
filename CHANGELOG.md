@@ -7,6 +7,30 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ---
 
+## [1.5.1] - 2026-07-12
+
+### Fixed
+
+- **`formatResult` truncation cliff**: when every expanded/media row alone exceeded
+  `QOBRIX_MCP_MAX_RESULT_CHARS`, binary search kept `0` rows and returned
+  `data: []`. Rows are now re-rendered **scalar-only** (nested expand/media
+  dropped), at least one row is always kept, and `_truncated.compacted: true`
+  is set.
+- **Expensive expand/media scans**: with `boost` + `expand`/`media`, `max_scan`
+  is auto-capped at **100** (was hard-capped only at 500). Pagination may
+  include `scan_capped_reason: "expand/media"`.
+
+### Added
+
+- **Response-size refine guard**: when a payload is grossly oversized
+  (default `> 8 ×` the char cap, override `QOBRIX_MCP_REFINE_MULTIPLIER`) or
+  compaction still cannot fit a usable page, tools return
+  `status: "result_too_large"` with `_refine_required.assistant_instruction`
+  (and a small `returned_sample`) so the LLM asks the user to narrow the
+  query instead of dumping or stalling. `isError: false`.
+
+---
+
 ## [1.5.0] - 2026-07-12
 
 ### Added
