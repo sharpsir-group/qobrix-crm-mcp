@@ -1,0 +1,74 @@
+{
+  "name": "qobrix-crm-mcp",
+  "version": "1.3.0",
+  "description": "Read-only Model Context Protocol (MCP) server for Qobrix CRM: tools for listings, leads, deals, RESO DD 2.0 workflows, relevance property/project search with DSL help, built-in analytics (count/top-N), and optional Redis-backed response caching for Cursor, Claude, and other MCP clients.",
+  "type": "module",
+  "bin": {
+    "qobrix-crm-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "node -r ./test-suite/load-env.cjs --test test-suite/integration.test.mjs",
+    "test:scenarios": "node -r ./test-suite/load-env.cjs --test test-suite/scenarios.test.mjs",
+    "test:workflows": "node -r ./test-suite/load-env.cjs --test test-suite/workflows.test.mjs",
+    "test:cache": "node --test test-suite/cache.test.mjs",
+    "test:format": "node --test test-suite/format.test.mjs",
+    "test:relevance": "node --test test-suite/relevance.test.mjs",
+    "test:oauth-modes": "node --test test-suite/oauth-modes.test.mjs",
+    "test:all": "node -r ./test-suite/load-env.cjs --test test-suite/integration.test.mjs test-suite/scenarios.test.mjs test-suite/workflows.test.mjs test-suite/cache.test.mjs test-suite/format.test.mjs test-suite/relevance.test.mjs test-suite/oauth-modes.test.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "qobrix",
+    "crm",
+    "real-estate",
+    "reso",
+    "reso-dd-2.0",
+    "property",
+    "listing",
+    "mls",
+    "ai",
+    "llm",
+    "cursor",
+    "anthropic",
+    "openai",
+    "vscode",
+    "redis",
+    "property-management",
+    "brokerage",
+    "claude-desktop",
+    "lead-generation",
+    "mcp-server"
+  ],
+  "author": "SharpSir Group <dev@sharpsir.group> (https://sharpsir.group)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sharpsir-group/qobrix-crm-mcp.git"
+  },
+  "homepage": "https://github.com/sharpsir-group/qobrix-crm-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/sharpsir-group/qobrix-crm-mcp/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "express": "^5.2.1",
+    "express-rate-limit": "^7.5.1",
+    "zod": "^3.24.0"
+  },
+  "optionalDependencies": {
+    "redis": "^4.7.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

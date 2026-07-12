@@ -1,0 +1,273 @@
+import type {
+  QobrixPaginatedResponse,
+  QobrixSingleResponse,
+  QobrixErrorResponse,
+  ListOpts,
+  GetOpts,
+  ChangesOpts,
+} from "./types.js";
+import { getCache, cacheKey } from "./cache.js";
+import {
+  getAuthContext,
+  credentialFingerprint,
+  type AuthCredentials,
+} from "./auth-context.js";
+
+export type QobrixClientOptions = {
+  apiUrl: string;
+  apiUser: string;
+  apiKey: string;
+  locale?: string;
+};
+
+export class QobrixClient {
+  private baseUrl: string;
+  private headers: Record<string, string>;
+  readonly fingerprint: string;
+
+  constructor(opts: QobrixClientOptions) {
+    if (!opts.apiUrl || !opts.apiUser || !opts.apiKey) {
+      throw new Error(
+        "Missing required Qobrix credentials: apiUrl, apiUser, apiKey"
+      );
+    }
+
+    this.baseUrl = opts.apiUrl.replace(/\/+$/, "");
+    this.headers = {
+      "X-Api-User": opts.apiUser,
+      "X-Api-Key": opts.apiKey,
+      Accept: "application/json",
+    };
+    if (opts.locale) {
+      this.headers["X-Locale"] = opts.locale;
+    }
+    this.fingerprint = credentialFingerprint({
+      apiUrl: this.baseUrl,
+      apiUser: opts.apiUser,
+      apiKey: opts.apiKey,
+    });
+  }
+
+  static fromEnv(env: NodeJS.ProcessEnv = process.env): QobrixClient {
+    const url = env.QOBRIX_API_URL;
+    const apiUser = env.QOBRIX_API_USER;
+    const apiKey = env.QOBRIX_API_KEY;
+    if (!url || !apiUser || !apiKey) {
+      throw new Error(
+        "Missing required environment variables: QOBRIX_API_URL, QOBRIX_API_USER, QOBRIX_API_KEY"
+      );
+    }
+    return new QobrixClient({
+      apiUrl: url,
+      apiUser,
+      apiKey,
+      locale: env.QOBRIX_LOCALE,
+    });
+  }
+
+  static fromContext(creds: AuthCredentials): QobrixClient {
+    const apiUrl = creds.apiUrl || process.env.QOBRIX_API_URL;
+    if (!apiUrl) {
+      throw new Error(
+        "Missing Qobrix API URL: set QOBRIX_API_URL or include apiUrl in auth context"
+      );
+    }
+    return new QobrixClient({
+      apiUrl,
+      apiUser: creds.apiUser,
+      apiKey: creds.apiKey,
+      locale: creds.locale || process.env.QOBRIX_LOCALE,
+    });
+  }
+
+  private buildUrl(path: string, params?: Record<string, string | string[] | boolean | number | undefined>): string {
+    const url = new URL(`${this.baseUrl}/api/v2/${path}`);
+
+    if (params) {
+      for (const [key, value] of Object.entries(params)) {
+        if (value === undefined || value === null) continue;
+
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            url.searchParams.append(`${key}[]`, item);
+          }
+        } else {
+          url.searchParams.set(key, String(value));
+        }
+      }
+    }
+
+    return url.toString();
+  }
+
+  async request<T>(path: string, params?: Record<string, string | string[] | boolean | number | undefined>): Promise<T> {
+    const cache = getCache();
+    if (!cache.enabled) {
+      return this.fetchUpstream<T>(path, params);
+    }
+    const key = cacheKey("request", path, params, this.fingerprint);
+    return cache.fetch<T>(key, () => this.fetchUpstream<T>(path, params));
+  }
+
+  /** Bypass response cache — use for audit / change-log reads that must be fresh. */
+  async requestFresh<T>(
+    path: string,
+    params?: Record<string, string | string[] | boolean | number | undefined>
+  ): Promise<T> {
+    return this.fetchUpstream<T>(path, params);
+  }
+
+  private changesParams(opts: ChangesOpts = {}): Record<string, string | string[] | boolean | number | undefined> {
+    const params: Record<string, string | string[] | boolean | number | undefined> = {
+      limit: opts.limit,
+      page: opts.page,
+      search: opts.search,
+    };
+    if (opts.sort !== undefined) {
+      params.sort = Array.isArray(opts.sort) ? opts.sort : opts.sort;
+    }
+    if (opts.fields) params.fields = opts.fields;
+    return params;
+  }
+
+  async listChanges(resource: string, opts: ChangesOpts = {}): Promise<QobrixPaginatedResponse> {
+    return this.request<QobrixPaginatedResponse>(`${resource}/changes`, this.changesParams(opts));
+  }
+
+  async getRecordChanges(
+    resource: string,
+    id: string,
+    opts: ChangesOpts = {}
+  ): Promise<QobrixPaginatedResponse> {
+    return this.request<QobrixPaginatedResponse>(
+      `${resource}/${id}/changes`,
+      this.changesParams(opts)
+    );
+  }
+
+  private async fetchUpstream<T>(
+    path: string,
+    params?: Record<string, string | string[] | boolean | number | undefined>
+  ): Promise<T> {
+    const url = this.buildUrl(path, params);
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: this.headers,
+    });
+
+    if (!response.ok) {
+      let errorBody: string;
+      try {
+        const errJson = (await response.json()) as QobrixErrorResponse;
+        errorBody = errJson.errors
+          ?.map((e) => e.message || JSON.stringify(e))
+          .join("; ") || `HTTP ${response.status}`;
+      } catch {
+        errorBody = `HTTP ${response.status} ${response.statusText}`;
+      }
+      throw new Error(`Qobrix API error: ${errorBody}`);
+    }
+
+    return (await response.json()) as T;
+  }
+
+  async list(resource: string, opts: ListOpts = {}): Promise<QobrixPaginatedResponse> {
+    // Defaults: compact payloads. Qobrix's own defaults expand all FKs into
+    // nested objects and inline media metadata, which blows up tool outputs
+    // (a single Properties row can be 30 KB+). Default expand/media to false
+    // so list/get tools return short, FK-as-UUID rows. Callers can opt in
+    // explicitly with expand: true or media: true.
+    const params: Record<string, string | string[] | boolean | number | undefined> = {
+      limit: opts.limit,
+      page: opts.page,
+      search: opts.search,
+      expand: opts.expand ?? false,
+      media: opts.media ?? false,
+      trashed: opts.trashed,
+      segment: opts.segment,
+      related_model: opts.related_model,
+      related_id: opts.related_id,
+    };
+
+    if (opts.sort) params.sort = opts.sort;
+    if (opts.fields) params.fields = opts.fields;
+    if (opts.include) params.include = opts.include;
+
+    return this.request<QobrixPaginatedResponse>(resource, params);
+  }
+
+  async get(resource: string, id: string, opts: GetOpts = {}): Promise<QobrixSingleResponse> {
+    const params: Record<string, string | string[] | boolean | number | undefined> = {
+      expand: opts.expand ?? false,
+      trashed: opts.trashed,
+    };
+
+    if (opts.include) params.include = opts.include;
+
+    return this.request<QobrixSingleResponse>(`${resource}/${id}`, params);
+  }
+
+  async getSubresource(resource: string, id: string, sub: string, params?: Record<string, string | string[] | boolean | number | undefined>): Promise<unknown> {
+    return this.request<unknown>(`${resource}/${id}/${sub}`, params);
+  }
+
+  async getPath(path: string, params?: Record<string, string | string[] | boolean | number | undefined>): Promise<unknown> {
+    return this.request<unknown>(path, params);
+  }
+}
+
+/** LRU of credential-scoped clients (Modes B/C). Cap keeps memory bounded. */
+const CLIENT_LRU_MAX = 64;
+const _clientByFp = new Map<string, QobrixClient>();
+let _envClient: QobrixClient | null = null;
+let _envFallbackEnabled = true;
+
+/**
+ * Disable the process.env credential fallback. Modes B/C call this so a tool
+ * that somehow runs outside the request auth scope fails closed instead of
+ * silently using a shared service account.
+ */
+export function disableEnvFallback(): void {
+  _envFallbackEnabled = false;
+}
+
+function touchLru(fp: string, client: QobrixClient): QobrixClient {
+  if (_clientByFp.has(fp)) _clientByFp.delete(fp);
+  _clientByFp.set(fp, client);
+  while (_clientByFp.size > CLIENT_LRU_MAX) {
+    const oldest = _clientByFp.keys().next().value;
+    if (oldest === undefined) break;
+    _clientByFp.delete(oldest);
+  }
+  return client;
+}
+
+/**
+ * Prefer AsyncLocalStorage credentials (Modes B/C); fall back to process.env (Mode A).
+ */
+export function getClient(): QobrixClient {
+  const ctx = getAuthContext();
+  if (ctx?.apiUser && ctx?.apiKey) {
+    const tmp = QobrixClient.fromContext(ctx);
+    const existing = _clientByFp.get(tmp.fingerprint);
+    if (existing) return touchLru(tmp.fingerprint, existing);
+    return touchLru(tmp.fingerprint, tmp);
+  }
+  if (!_envFallbackEnabled) {
+    throw new Error(
+      "No per-request Qobrix credentials in scope and env fallback is disabled (Mode B/C)"
+    );
+  }
+  if (!_envClient) {
+    _envClient = QobrixClient.fromEnv();
+  }
+  return _envClient;
+}
+
+/** Test helper — clears cached clients. */
+export function __resetClientsForTests(): void {
+  _envClient = null;
+  _clientByFp.clear();
+  _envFallbackEnabled = true;
+}
