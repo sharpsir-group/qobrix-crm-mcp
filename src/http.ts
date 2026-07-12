@@ -30,6 +30,7 @@ import {
   refreshIfNeeded,
   signCookie,
 } from "./oauth-client.js";
+import { errorHtml, successHtml } from "./auth-pages.js";
 
 const MCP_PATH = "/mcp";
 
@@ -62,34 +63,6 @@ function resolveAllowedHosts(bindHost: string): string[] | undefined {
   if (!isLoopbackHost(bindHost)) return fromEnv;
   const loopback = ["127.0.0.1", "localhost", "::1"];
   return [...new Set([...fromEnv, ...loopback])];
-}
-
-function successHtml(subject?: string): string {
-  const who = subject ? ` (subject ${subject.slice(0, 12)}…)` : "";
-  return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"/><title>Qobrix connected</title>
-<style>
-  body{font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;line-height:1.5}
-  h1{font-size:1.25rem} .ok{color:#0a7a3e}
-</style></head><body>
-  <h1 class="ok">Connected to Qobrix</h1>
-  <p>Authorization completed${who}. You can close this tab and return to the chat — ask the agent to retry.</p>
-</body></html>`;
-}
-
-function errorHtml(message: string): string {
-  return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"/><title>Authorization failed</title>
-<style>
-  body{font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;line-height:1.5}
-  h1{font-size:1.25rem;color:#a11} code{word-break:break-all}
-</style></head><body>
-  <h1>Authorization failed</h1>
-  <p><code>${message.replace(/[<>&]/g, (c) =>
-    ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c] || c)
-  )}</code></p>
-  <p>Return to the chat and ask the agent to request authorization again.</p>
-</body></html>`;
 }
 
 export async function startHttpServer(): Promise<void> {

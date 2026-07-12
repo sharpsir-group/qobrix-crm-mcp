@@ -7,6 +7,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ---
 
+## [1.5.3] - 2026-07-12
+
+### Changed
+
+- Mode C `/oauth/callback` success and error pages now use the same HumaticAI
+  card shell as the Enterprise OAuth login page (logo, Qobrix brand row,
+  background). Primary **Close** button calls `window.close()`; if the browser
+  blocks it, a muted hint asks the user to close manually and return to chat.
+
+---
+
 ## [1.5.2] - 2026-07-12
 
 ### Fixed

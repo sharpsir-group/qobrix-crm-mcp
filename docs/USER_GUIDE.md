@@ -2,7 +2,7 @@
 
 Connect Claude, Cursor, ChatGPT, PeerPane / ragchat, or any MCP client to live Qobrix CRM data.
 
-**Package version:** see [`package.json`](../package.json) (currently **1.5.2**).  
+**Package version:** see [`package.json`](../package.json) (currently **1.5.3**).  
 **Tools:** **64** MCP tools (entities, analytics, reporting, audit, cache, session/identity). Full list: [README — Tools at a Glance](../README.md#tools-at-a-glance).  
 **Changelog:** [`CHANGELOG.md`](../CHANGELOG.md).
 
@@ -177,7 +177,7 @@ export MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL=true
    - **URL-mode elicitation** (`JSON-RPC -32042`) when the client supports `elicitation.url`, or
    - A Markdown **`[Sign In to Qobrix]({PUBLIC_URL}/connect?e=…)`** link (ragchat / LangChain fallback). The LLM must show that exact link (unique / single-use — never reuse a link from an earlier message).
 3. User opens `{PUBLIC_URL}/connect?e=…` → signed cookie → redirect to the AS login (HumaticAI-styled form: CRM URL, username, password, optional 2FA, collapsible legal clickwrap).
-4. AS redirects to `{PUBLIC_URL}/oauth/callback` → PKCE exchange + introspection → encrypted session vault (`session.enc`).
+4. AS redirects to `{PUBLIC_URL}/oauth/callback` → PKCE exchange + introspection → encrypted session vault (`session.enc`). The browser shows a **Connected** (or error) page in the same HumaticAI card shell as the login form, with a **Close** button — close the window and return to the chat to continue.
 5. User retries — tools run with that user’s minted Qobrix API key.
 6. **`qobrix_whoami`** returns the current profile (`user` + `capabilities` + `portals`, plus OAuth `subject` when available).
 7. **`qobrix_sign_out`** fully revokes: AS `/disconnect` (Bearer) deletes the minted Qobrix API key and clears the AS vault/tokens, then the local vault is wiped. Mode C uses one shared vault — sign-out disconnects the shared identity for this MCP process.
