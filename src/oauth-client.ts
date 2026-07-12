@@ -325,6 +325,105 @@ export function clearSession(): void {
   persistSession(null);
 }
 
+/**
+ * Full Mode C disconnect: revoke at the AS (deletes minted Qobrix API key +
+ * AS vault/tokens), fall back to direct Qobrix api-key DELETE if needed, then
+ * clear the local session vault.
+ */
+export async function revokeSession(): Promise<{
+  revoked: boolean;
+  asDisconnect: boolean;
+  qobrixKeyDeleted: boolean;
+}> {
+  // Snapshot before refresh — refreshIfNeeded() clears the vault on failure,
+  // which would otherwise skip the Qobrix key DELETE fallback.
+  const before = loadSession();
+  if (!before?.apiUser || !before?.apiKey) {
+    clearSession();
+    return { revoked: false, asDisconnect: false, qobrixKeyDeleted: false };
+  }
+  const snapshot = {
+    apiUser: before.apiUser,
+    apiKey: before.apiKey,
+    apiUrl: (before.apiUrl || process.env.QOBRIX_API_URL || "").replace(
+      /\/+$/,
+      ""
+    ),
+    accessToken: before.accessToken,
+  };
+
+  // Best-effort refresh so /disconnect gets a currently-valid Bearer token.
+  await refreshIfNeeded();
+  const after = loadSession();
+  const accessToken = after?.accessToken || snapshot.accessToken;
+
+  let asDisconnect = false;
+  let qobrixKeyDeleted = false;
+
+  // Prefer AS /disconnect (Bearer access token) — deletes key + AS vault.
+  if (accessToken) {
+    try {
+      const { issuer } = requireOAuthEnv();
+      const issuerBase = issuer.href.replace(/\/+$/, "");
+      const res = await fetch(`${issuerBase}/disconnect`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+      });
+      if (res.ok) {
+        asDisconnect = true;
+        qobrixKeyDeleted = true;
+      } else {
+        const text = await res.text().catch(() => "");
+        process.stderr.write(
+          `[qobrix-crm-mcp] AS /disconnect failed: HTTP ${res.status} ${text}\n`
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `[qobrix-crm-mcp] AS /disconnect error: ${msg}\n`
+      );
+    }
+  }
+
+  // Fallback: delete the minted Qobrix API key directly so it never lingers.
+  // Always use the pre-refresh snapshot — refresh may have cleared the vault.
+  if (!qobrixKeyDeleted && snapshot.apiUrl) {
+    try {
+      const res = await fetch(`${snapshot.apiUrl}/api/v2/profile/api-key`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          "X-Api-User": snapshot.apiUser,
+          "X-Api-Key": snapshot.apiKey,
+        },
+      });
+      if (res.ok || res.status === 204 || res.status === 404) {
+        qobrixKeyDeleted = true;
+      } else {
+        process.stderr.write(
+          `[qobrix-crm-mcp] Qobrix api-key DELETE failed: HTTP ${res.status}\n`
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `[qobrix-crm-mcp] Qobrix api-key DELETE error: ${msg}\n`
+      );
+    }
+  }
+
+  clearSession();
+  return {
+    revoked: true,
+    asDisconnect,
+    qobrixKeyDeleted,
+  };
+}
+
 export function registerElicitationNotifier(
   elicitationId: string,
   notifier: () => Promise<void>

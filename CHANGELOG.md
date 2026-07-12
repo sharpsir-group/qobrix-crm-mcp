@@ -7,6 +7,35 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ---
 
+## [1.5.0] - 2026-07-12
+
+### Added
+
+- Session & identity tools: **`qobrix_sign_in`**, **`qobrix_sign_out`**, **`qobrix_whoami`**
+  (64 tools total). Mode C sign-in reuses the existing `/connect` elicitation /
+  Markdown link path; sign-out fully revokes via AS `/disconnect` (deletes the
+  minted Qobrix API key + AS vault) with a direct Qobrix `DELETE /profile/api-key`
+  fallback, then clears the local session vault; whoami returns
+  `GET /api/v2/session/` (user + capabilities + portals) with a
+  `GET /users/{apiUser}` fallback.
+
+### Changed
+
+- Mode C non-elicitation fallback now returns a Markdown
+  **`[Sign In to Qobrix](connectUrl)`** link and instructs the LLM to present it
+  verbatim (unique / single-use — never reuse an earlier link).
+
+### Fixed
+
+- **`qobrix_whoami`** no longer routes profile probes through `fetchUpstream`
+  (which clears the Mode C vault on 401/403). Uses a non-destructive
+  `tryGetPath` so a JWT-only `GET /session/` 401 cannot log the user out.
+- **`revokeSession`** snapshots vault credentials before token refresh so a
+  failed refresh cannot skip the Qobrix API-key DELETE fallback.
+- **`qobrix_sign_in`** "already connected" message prefers `api_user` over the
+  raw SHA-256 OAuth subject.
+---
+
 ## [1.4.2] - 2026-07-12
 
 ### Fixed

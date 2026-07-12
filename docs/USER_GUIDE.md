@@ -2,8 +2,8 @@
 
 Connect Claude, Cursor, ChatGPT, PeerPane / ragchat, or any MCP client to live Qobrix CRM data.
 
-**Package version:** see [`package.json`](../package.json) (currently **1.4.2**).  
-**Tools:** **61** read-only MCP tools (entities, analytics, reporting, audit, cache). Full list: [README — Tools at a Glance](../README.md#tools-at-a-glance).
+**Package version:** see [`package.json`](../package.json) (currently **1.5.0**).  
+**Tools:** **64** MCP tools (entities, analytics, reporting, audit, cache, session/identity). Full list: [README — Tools at a Glance](../README.md#tools-at-a-glance).
 
 | Mode | Transport | Credentials | Best for |
 |------|-----------|-------------|----------|
@@ -166,13 +166,15 @@ export MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL=true
 
 ### 2. What the user sees in chat
 
-1. Agent calls a CRM tool with no session.
+1. Agent calls a CRM tool with no session (or calls **`qobrix_sign_in`** / **`qobrix_whoami`**).
 2. MCP returns either:
    - **URL-mode elicitation** (`JSON-RPC -32042`) when the client supports `elicitation.url`, or
-   - Plain tool-result text with the `/connect` link (ragchat / LangChain fallback).
+   - A Markdown **`[Sign In to Qobrix]({PUBLIC_URL}/connect?e=…)`** link (ragchat / LangChain fallback). The LLM must show that exact link (unique / single-use — never reuse a link from an earlier message).
 3. User opens `{PUBLIC_URL}/connect?e=…` → signed cookie → redirect to the AS login (HumaticAI-styled form: CRM URL, username, password, optional 2FA, collapsible legal clickwrap).
 4. AS redirects to `{PUBLIC_URL}/oauth/callback` → PKCE exchange + introspection → encrypted session vault (`session.enc`).
 5. User retries — tools run with that user’s minted Qobrix API key.
+6. **`qobrix_whoami`** returns the current profile (`user` + `capabilities` + `portals`, plus OAuth `subject` when available).
+7. **`qobrix_sign_out`** fully revokes: AS `/disconnect` (Bearer) deletes the minted Qobrix API key and clears the AS vault/tokens, then the local vault is wiped. Mode C uses one shared vault — sign-out disconnects the shared identity for this MCP process.
 
 ### 3. Endpoints
 

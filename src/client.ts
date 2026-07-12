@@ -237,6 +237,34 @@ export class QobrixClient {
   async getPath(path: string, params?: Record<string, string | string[] | boolean | number | undefined>): Promise<unknown> {
     return this.request<unknown>(path, params);
   }
+
+  /**
+   * Best-effort GET that never clears the Mode C vault and never throws on HTTP
+   * errors. Used by identity probes (whoami) where a 401 from a JWT-only endpoint
+   * must not revoke a valid API-key session.
+   */
+  async tryGetPath(
+    path: string,
+    params?: Record<string, string | string[] | boolean | number | undefined>
+  ): Promise<{ ok: boolean; status: number; data?: unknown }> {
+    const url = this.buildUrl(path, params);
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: this.headers,
+      });
+      if (!res.ok) {
+        return { ok: false, status: res.status };
+      }
+      return {
+        ok: true,
+        status: res.status,
+        data: await res.json().catch(() => undefined),
+      };
+    } catch {
+      return { ok: false, status: 0 };
+    }
+  }
 }
 
 /** LRU of credential-scoped clients (Modes B/C). Cap keeps memory bounded. */

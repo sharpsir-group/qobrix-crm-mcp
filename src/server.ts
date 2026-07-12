@@ -146,7 +146,7 @@ export function createServer(): McpServer {
   const server = new McpServer(
     {
       name: "qobrix-crm-mcp",
-      version: "1.4.2",
+      version: "1.5.0",
     },
     {
       instructions: SERVER_INSTRUCTIONS,

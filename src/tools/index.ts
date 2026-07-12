@@ -20,6 +20,7 @@ import { registerProductivityTools } from "./productivity.js";
 import { registerCustomerTools } from "./customers.js";
 import { registerCacheTools } from "./cache.js";
 import { registerAuditTools } from "./audit.js";
+import { registerSessionTools } from "./session.js";
 import { AuthRequiredError, registerElicitationNotifier } from "../oauth-client.js";
 import {
   clientSupportsUrlElicitation,
@@ -172,18 +173,19 @@ export function errorResult(error: unknown) {
       );
     }
 
-    // Fallback for clients without elicitation (ragchat / LangChain): plain
-    // tool-result text the LLM relays to the user. isError:false so the model
-    // does not treat it as a hard failure to retry blindly.
+    // Fallback for clients without elicitation (ragchat / LangChain): Markdown
+    // link the LLM relays verbatim. isError:false so the model does not treat
+    // it as a hard failure to retry blindly.
     return {
       content: [
         {
           type: "text" as const,
           text:
-            "Qobrix needs authorization before this tool can run.\n\n" +
-            "Ask the user to open this link to sign in (login + 2FA + consent):\n\n" +
-            `${error.connectUrl}\n\n` +
-            "After they finish, retry the same request — the MCP will use their Qobrix credentials.",
+            "Qobrix authorization is required before this tool can run.\n\n" +
+            "Show the user this exact Markdown link (do not alter the URL) so they can sign in (login + 2FA + consent):\n\n" +
+            `[Sign In to Qobrix](${error.connectUrl})\n\n` +
+            "This link is unique and single-use — always present the link from THIS tool result; never reuse or repeat a link from an earlier message.\n\n" +
+            "After they complete sign-in, retry the same request — the MCP will use their Qobrix credentials.",
         },
       ],
       isError: false as const,
@@ -224,4 +226,5 @@ export function registerTools(server: McpServer): void {
   registerCustomerTools(server);
   registerCacheTools(server);
   registerAuditTools(server);
+  registerSessionTools(server);
 }

@@ -39,9 +39,17 @@ function waitUrl(url, { timeoutMs = 15000 } = {}) {
 }
 
 function spawnNode(cwd, args, env) {
+  // Do not inherit production OAuth allowlists / data dirs from the parent shell
+  // (e.g. PM2-exported QOBRIX_OAUTH_REDIRECT_ALLOWLIST would reject test ports).
+  const scrubbed = { ...process.env };
+  for (const key of Object.keys(scrubbed)) {
+    if (key.startsWith("QOBRIX_") || key === "MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL") {
+      delete scrubbed[key];
+    }
+  }
   const child = spawn("node", args, {
     cwd,
-    env: { ...process.env, ...env },
+    env: { ...scrubbed, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stderr.on("data", () => {});
@@ -286,8 +294,65 @@ describe("modes + open-core pairing", () => {
       } else {
         const text = JSON.stringify(rpc.result || rpc);
         assert.match(text, /\/connect\?e=/);
+        assert.match(text, /\[Sign In to Qobrix\]\(/);
         assert.match(text, /authorization|sign in|Qobrix/i);
+        assert.match(text, /unique and single-use|never reuse/i);
       }
+
+      // Session tools: sign_in / whoami (cold) surface connect link; sign_out with no session
+      const signInRes = await mcpCallTool(
+        resource,
+        sessionId,
+        "qobrix_sign_in",
+        {}
+      );
+      const signInRpc = await readJsonRpc(signInRes);
+      if (signInRpc.error) {
+        assert.equal(signInRpc.error.code, -32042);
+        assert.match(
+          String(
+            signInRpc.error.data?.elicitations?.[0]?.url ||
+              JSON.stringify(signInRpc.error.data)
+          ),
+          /\/connect\?e=/
+        );
+      } else {
+        const t = JSON.stringify(signInRpc.result || signInRpc);
+        assert.match(t, /\/connect\?e=/);
+        assert.match(t, /\[Sign In to Qobrix\]\(/);
+      }
+
+      const whoamiRes = await mcpCallTool(
+        resource,
+        sessionId,
+        "qobrix_whoami",
+        {}
+      );
+      const whoamiRpc = await readJsonRpc(whoamiRes);
+      if (whoamiRpc.error) {
+        assert.equal(whoamiRpc.error.code, -32042);
+        assert.match(
+          String(
+            whoamiRpc.error.data?.elicitations?.[0]?.url ||
+              JSON.stringify(whoamiRpc.error.data)
+          ),
+          /\/connect\?e=/
+        );
+      } else {
+        const t = JSON.stringify(whoamiRpc.result || whoamiRpc);
+        assert.match(t, /\/connect\?e=/);
+      }
+
+      const signOutRes = await mcpCallTool(
+        resource,
+        sessionId,
+        "qobrix_sign_out",
+        {}
+      );
+      const signOutRpc = await readJsonRpc(signOutRes);
+      assert.ok(!signOutRpc.error, "sign_out should not error when disconnected");
+      const signOutText = JSON.stringify(signOutRpc.result || signOutRpc);
+      assert.match(signOutText, /No active Qobrix session/i);
 
       // Fingerprint helper sanity (Mode B/C cache scoping)
       const fp = createHash("sha256").update("u|k").digest("hex").slice(0, 16);

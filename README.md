@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Connect Claude, Cursor, and other MCP clients to your Qobrix real-estate CRM</strong> — listings, leads, viewings, offers, contracts, and activity in one read-only <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> layer.<br />
-  <strong>61 tools</strong> (CRM entities + AI relevance search + analytics + audit + cache controls), <a href="https://www.reso.org/data-dictionary/">RESO Data Dictionary 2.0</a> workflows, optional <strong>Redis-backed response caching</strong>, <strong>three auth modes</strong> (stdio / headers / OAuth 2.1), and <strong>217 automated tests</strong>.
+  <strong>64 tools</strong> (CRM entities + AI relevance search + analytics + audit + cache controls + session/identity), <a href="https://www.reso.org/data-dictionary/">RESO Data Dictionary 2.0</a> workflows, optional <strong>Redis-backed response caching</strong>, <strong>three auth modes</strong> (stdio / headers / OAuth 2.1), and <strong>217 automated tests</strong>.
 </p>
 
 <p align="center">
@@ -101,7 +101,7 @@ The server is organized around six RESO-aligned business processes. The LLM rece
 
 ### Tools at a Glance
 
-**61** read-only tools — CRM entities, schema discovery, **analytics** (`qobrix_count`, `qobrix_top_values`, `qobrix_top_records`, `qobrix_aggregate`), a flexible **deals** shortcut (`qobrix_deals`), **reporting** (`qobrix_timeseries`, `qobrix_funnel`, `qobrix_rep_scorecard`, `qobrix_stale_leads`, `qobrix_win_loss`, `qobrix_days_on_market`), **customer** intelligence (`qobrix_cohort`), **audit** / change history (`qobrix_get_changes`, `qobrix_search_changes`, `qobrix_field_change_history`, `qobrix_top_field_changers`), and **cache** helpers (`qobrix_cache_stats`, `qobrix_cache_clear`):
+**64** tools — CRM entities, schema discovery, **analytics** (`qobrix_count`, `qobrix_top_values`, `qobrix_top_records`, `qobrix_aggregate`), a flexible **deals** shortcut (`qobrix_deals`), **reporting** (`qobrix_timeseries`, `qobrix_funnel`, `qobrix_rep_scorecard`, `qobrix_stale_leads`, `qobrix_win_loss`, `qobrix_days_on_market`), **customer** intelligence (`qobrix_cohort`), **audit** / change history (`qobrix_get_changes`, `qobrix_search_changes`, `qobrix_field_change_history`, `qobrix_top_field_changers`), **cache** helpers (`qobrix_cache_stats`, `qobrix_cache_clear`), and **session & identity** (`qobrix_sign_in`, `qobrix_sign_out`, `qobrix_whoami`):
 
 | Entity Group | Tools | Capabilities |
 |-------------|-------|-------------|
@@ -125,6 +125,7 @@ The server is organized around six RESO-aligned business processes. The LLM rece
 | **Customers** | 1 | Repeat-buyer / seller / lead cohorts (`qobrix_cohort`) — find contacts that appear on multiple closed deals or opportunities |
 | **Audit** | 4 | Per-record change log (`qobrix_get_changes`), cross-resource change search (`qobrix_search_changes`), field-level history (`qobrix_field_change_history`), top field changers (`qobrix_top_field_changers`) |
 | **Cache** | 2 | Stats and prefix or full invalidation for fresher reads |
+| **Session & identity** | 3 | Interactive sign-in (`qobrix_sign_in`), full revoke sign-out (`qobrix_sign_out`), current user profile (`qobrix_whoami`) — Mode C; sensible no-ops in Modes A/B |
 
 Every tool description includes its canonical workflow role, RESO equivalent, verified `include[]` options, FK resolution guidance, and search expression examples.
 
@@ -282,10 +283,11 @@ How Mode C works (MCP self-auth — northbound clients unchanged):
 
 1. A tool runs with no session → the MCP returns an authorization URL:
    - **URL-mode elicitation** (`JSON-RPC -32042`) when the client supports `elicitation.url` (Claude, Cursor, etc.)
-   - **Plain tool-result text** with the same `/connect` link for clients without elicitation (e.g. ragchat / LangChain) — the LLM relays it to the user
+   - A Markdown **`[Sign In to Qobrix](/connect?e=…)`** link in the tool result for clients without elicitation (e.g. ragchat / LangChain) — the LLM must relay it verbatim (unique / single-use; never reuse an older link)
 2. The user opens **`/connect`** on this server (anti-phishing indirection) → signed cookie + redirect to the Enterprise OAuth login page
 3. After login + 2FA + consent, the AS redirects to **`/oauth/callback`**; this MCP exchanges the code (PKCE), introspects for Qobrix credentials, and stores them in an **encrypted session vault**
 4. The next tool call runs authenticated. On Qobrix `401`/`403`, the vault is cleared and a fresh `/connect` URL is returned
+5. Agents can also call **`qobrix_sign_in`**, **`qobrix_whoami`**, and **`qobrix_sign_out`** (full revoke via AS `/disconnect` + Qobrix API-key delete)
 
 - Not available as a public download and **not** something you can clone from GitHub.
 - Delivered and configured by our team **upon request** as an enterprise solution bundle.
