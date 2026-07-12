@@ -186,9 +186,10 @@ export MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL=true
 - Always set **`QOBRIX_MCP_RESOURCE_URL`** to the full public `/mcp` URL.
 - DCR `redirect_uri` must equal `{PUBLIC_URL}/oauth/callback` exactly (re-register if you change the public URL).
 - Persist **`QOBRIX_MCP_DATA_DIR`** (DCR client + session vault).
-- Mode C uses a **single shared session vault** per process — pin `HOST` to loopback / trusted network.
+- **Single active session — one CRM identity per MCP process.** Mode C stores one encrypted vault (`session.enc`) for the whole server. Whoever completes `/connect` last is the identity every tool call uses until reconnect or vault clear. Do **not** share one Mode C process across unrelated end users expecting isolation; run one process per tenant/user, or use Mode B with per-request headers from a trusted backend.
+- Because `/mcp` has **no client bearer**, bind `QOBRIX_MCP_HOST` to loopback / a trusted network. If you reverse-proxy only the browser routes (`/connect`, `/oauth/callback`), **deny public access to `/mcp` and `/health`** (agents such as ragchat should call `http://127.0.0.1:<port>/mcp` on the host). Exposing `/mcp` on the internet would let any caller use the shared vault after someone signs in.
 - Prefer **subdomain** public URLs for the Authorization Server. Path mounts work when the AS login form uses a relative POST and connect cookies use `Path` equal to the PUBLIC_URL pathname (avoids reverse-proxy cookie-path rewrites).
-- Reference production (HumaticAI): `https://humaticai.com/qobrix-mcp` + `https://humaticai.com/qobrix-oauth`.
+- Reference production (HumaticAI): `https://humaticai.com/qobrix-mcp` + `https://humaticai.com/qobrix-oauth` (public surface is OAuth routes only; `/mcp` stays localhost).
 
 ### 5. Verify
 

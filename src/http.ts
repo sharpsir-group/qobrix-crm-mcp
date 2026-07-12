@@ -86,7 +86,8 @@ export async function startHttpServer(): Promise<void> {
       : undefined,
   });
   // Behind Apache/Cloudflare — required for express-rate-limit + X-Forwarded-For
-  app.set("trust proxy", 1);
+  // Cloudflare -> Apache -> Node (two trusted hops for X-Forwarded-For).
+  app.set("trust proxy", 2);
 
   app.use(
     rateLimit({
