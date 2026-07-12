@@ -1,14 +1,17 @@
 # User Guide — Qobrix CRM MCP
 
-Connect Claude, Cursor, ChatGPT, PeerPane / ragchat, or any MCP client to live Qobrix CRM data. This guide walks the three auth modes in order of increasing capability.
+Connect Claude, Cursor, ChatGPT, PeerPane / ragchat, or any MCP client to live Qobrix CRM data.
+
+**Package version:** see [`package.json`](../package.json) (currently **1.4.2**).  
+**Tools:** **61** read-only MCP tools (entities, analytics, reporting, audit, cache). Full list: [README — Tools at a Glance](../README.md#tools-at-a-glance).
 
 | Mode | Transport | Credentials | Best for |
 |------|-----------|-------------|----------|
-| **A** (default, free) | stdio | Shared `QOBRIX_API_*` env | Local IDE, single shared identity |
+| **A** (default, free) | stdio | Shared `QOBRIX_API_*` env | Local IDE, one shared CRM identity |
 | **B** (free) | HTTP | Per-request `X-Api-User` / `X-Api-Key` | Trusted private callers (localhost ragchat, internal services) |
-| **C** (Enterprise) | HTTP | Self-service OAuth (`/connect` URL → login) | Per-user identity; agent works as the signed-in CRM user |
+| **C** (Enterprise) | HTTP | Self-service OAuth (`/connect` → login) | Signed-in CRM user (**one shared vault per MCP process** — not multi-tenant isolation) |
 
-**Prerequisites (all modes):** Node.js **≥ 20**, a Qobrix tenant URL, and API credentials (Modes A/B) or the **Enterprise OAuth** bundle (Mode C).
+**Prerequisites:** Node.js **≥ 20**, a Qobrix tenant URL, and API credentials (Modes A/B) or SharpSir’s **Enterprise OAuth** bundle (Mode C).
 
 ```bash
 git clone https://github.com/sharpsir-group/qobrix-crm-mcp.git
@@ -22,9 +25,9 @@ npm run build
 
 ## Which mode do I want?
 
-- Use **Mode A** if you are wiring Cursor / Claude Desktop for yourself with one service account.
-- Use **Mode B** if a trusted backend (ragchat, an internal API) already holds per-user or per-tenant Qobrix keys and can send them as headers on every `/mcp` call.
-- Use **Mode C** when the end user must sign in (login + 2FA + consent) so the agent runs **as that user**. Mode C requires SharpSir’s Enterprise OAuth solution — see [Enterprise OAuth](../README.md#enterprise-oauth) and the companion [OAuth User Guide](https://github.com/sharpsir-group/qobrix-crm-mcp) (delivered with the bundle).
+- **Mode A** — Cursor / Claude Desktop for yourself with one service account.
+- **Mode B** — a trusted backend already holds Qobrix keys and can send them as headers on every `/mcp` call.
+- **Mode C** — end user signs in (login + 2FA + consent) so tools run as that CRM user. Requires the proprietary **Enterprise OAuth** Authorization Server (delivered on request — [sharpsir.group](https://sharpsir.group) · [dev@sharpsir.group](mailto:dev@sharpsir.group)). The delivery package includes its own `docs/USER_GUIDE.md`. See also [Enterprise OAuth](../README.md#enterprise-oauth).
 
 ---
 
@@ -69,15 +72,15 @@ npm start
 
 ### 4. Smoke test
 
-Ask the agent: *“How many available properties are in the CRM?”* — it should call `search_properties` / `qobrix_count` and return live numbers.
+Ask the agent: *“How many available properties are in the CRM?”* — it should call `qobrix_search_properties` / `qobrix_count` and return live numbers.
 
-**Security:** Mode A is a shared identity. Do not expose the stdio process over the network.
+**Security:** Mode A is a shared identity. Do not expose the stdio process over the network. (HTTP + `QOBRIX_MCP_AUTH=env` also exists in code for shared-env over HTTP — prefer Mode B/C for multi-caller deployments.)
 
 ---
 
 ## Mode B — HTTP + per-request headers
 
-For trusted callers that already know the Qobrix credentials to use on each request. No OAuth. Env shared-key fallback is **disabled** — missing headers → `401`.
+For trusted callers that already know the Qobrix credentials to use on each request. No OAuth. Env shared-key fallback is **disabled** — missing headers → error (no silent fall-back to `.env` API keys).
 
 ### 1. Configure and start
 
@@ -86,7 +89,6 @@ export QOBRIX_MCP_TRANSPORT=http
 export QOBRIX_MCP_AUTH=headers
 export QOBRIX_MCP_HOST=127.0.0.1
 export QOBRIX_MCP_PORT=3502
-# Optional defaults (locale / cache only — not used as API identity)
 export QOBRIX_LOCALE=en-US
 npm start
 ```
@@ -104,7 +106,6 @@ npm start
 curl -s http://127.0.0.1:3502/health
 # {"ok":true,"transport":"http","auth":"headers",…}
 
-# Initialize (Streamable HTTP) — headers required on every /mcp call
 curl -s -X POST http://127.0.0.1:3502/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
@@ -123,9 +124,9 @@ Point a streamable-HTTP MCP server entry at `http://127.0.0.1:3502/mcp` and forw
 
 ## Mode C — self-service Enterprise OAuth
 
-The MCP becomes its **own** OAuth client and session holder. Northbound agents (ragchat, Claude, Cursor) need **no** bearer wiring: when a tool needs auth, the MCP returns a `/connect` URL; the user signs in; the next tool call runs as that user.
+The MCP becomes its **own** OAuth client and session holder. Northbound agents need **no** bearer wiring: when a tool needs auth, the MCP returns a `/connect` URL; the user signs in; the next tool call runs as that user.
 
-Requires the proprietary companion **Enterprise OAuth** Authorization Server (delivered on request — [sharpsir.group](https://sharpsir.group) · [dev@sharpsir.group](mailto:dev@sharpsir.group)). The delivery package includes its own `docs/USER_GUIDE.md` (pairing secrets, login/2FA, vault, public HTTPS).
+Requires the proprietary companion **Enterprise OAuth** Authorization Server (delivered on request). Pairing secrets, login UI, vault, and HTTPS ops are documented in that package’s `docs/USER_GUIDE.md`.
 
 ### 1. Pairing env (Resource Server)
 
@@ -135,20 +136,20 @@ export QOBRIX_MCP_AUTH=oauth
 export QOBRIX_MCP_HOST=127.0.0.1
 export QOBRIX_MCP_PORT=3502
 
-# Public HTTPS base (browser-facing /connect + /oauth/callback)
+# Public HTTPS base (browser-facing /connect + /oauth/callback only)
 export QOBRIX_MCP_PUBLIC_URL=https://qobrix-mcp.example.com
 # Audience MUST include /mcp (do not omit — PUBLIC_URL fallback drops the path)
 export QOBRIX_MCP_RESOURCE_URL=https://qobrix-mcp.example.com/mcp
+# Public hostname(s) for Host checks. When HOST is loopback, 127.0.0.1 / localhost / ::1
+# are auto-added so local agents (ragchat → http://127.0.0.1:3502/mcp) are not 403'd.
 export QOBRIX_MCP_ALLOWED_HOSTS=qobrix-mcp.example.com
-# When HOST is loopback, 127.0.0.1/localhost are auto-added so local agents work.
 
-# From the Enterprise OAuth bundle (identical secret on both sides)
 export QOBRIX_OAUTH_ISSUER=https://qobrix-oauth.example.com
 export QOBRIX_OAUTH_INTROSPECTION_SECRET='<shared-long-secret>'
 export QOBRIX_MCP_STATE_SECRET='<16+-char-secret>'   # cookies + session vault
 export QOBRIX_MCP_DATA_DIR=./data/mcp-oauth          # persist across restarts
 
-# Local http:// issuer only:
+# Local http:// issuer only (AS also auto-sets this for http: issuers):
 # export MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL=true
 
 npm start
@@ -169,28 +170,31 @@ export MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL=true
 2. MCP returns either:
    - **URL-mode elicitation** (`JSON-RPC -32042`) when the client supports `elicitation.url`, or
    - Plain tool-result text with the `/connect` link (ragchat / LangChain fallback).
-3. User opens `{PUBLIC_URL}/connect?e=…` → signed cookie → redirect to the Authorization Server login (username / password / 2FA / consent).
-4. AS redirects to `{PUBLIC_URL}/oauth/callback` → PKCE exchange + introspection → encrypted session vault.
-5. User retries the same question — tools run with that user’s Qobrix API key.
+3. User opens `{PUBLIC_URL}/connect?e=…` → signed cookie → redirect to the AS login (HumaticAI-styled form: CRM URL, username, password, optional 2FA, collapsible legal clickwrap).
+4. AS redirects to `{PUBLIC_URL}/oauth/callback` → PKCE exchange + introspection → encrypted session vault (`session.enc`).
+5. User retries — tools run with that user’s minted Qobrix API key.
 
 ### 3. Endpoints
 
-| Path | Purpose |
-|------|---------|
-| `GET /health` | Liveness; Mode C includes `connected: true/false` |
-| `GET /connect?e=…` | Start auth (cookie + 302 to AS) |
-| `GET /oauth/callback` | Code exchange + vault write |
-| `POST/GET/DELETE /mcp` | Streamable HTTP MCP (no client bearer in Mode C) |
+| Path | Purpose | Public? |
+|------|---------|---------|
+| `GET /connect?e=…` | Start auth (cookie + 302 to AS) | Yes (browser) |
+| `GET /oauth/callback` | Code exchange + vault write | Yes (browser) |
+| `GET /health` | Liveness; Mode C includes `connected: true/false` | Prefer localhost only |
+| `POST/GET/DELETE /mcp` | Streamable HTTP MCP (no client bearer in Mode C) | Prefer localhost only |
 
-### 4. Gotchas
+### 4. Gotchas (production)
 
 - Always set **`QOBRIX_MCP_RESOURCE_URL`** to the full public `/mcp` URL.
-- DCR `redirect_uri` must equal `{PUBLIC_URL}/oauth/callback` exactly (re-register if you change the public URL).
+- DCR `redirect_uri` must equal `{PUBLIC_URL}/oauth/callback` exactly (re-register / clear `DATA_DIR` client if you change the public URL).
 - Persist **`QOBRIX_MCP_DATA_DIR`** (DCR client + session vault).
-- **Single active session — one CRM identity per MCP process.** Mode C stores one encrypted vault (`session.enc`) for the whole server. Whoever completes `/connect` last is the identity every tool call uses until reconnect or vault clear. Do **not** share one Mode C process across unrelated end users expecting isolation; run one process per tenant/user, or use Mode B with per-request headers from a trusted backend.
-- Because `/mcp` has **no client bearer**, bind `QOBRIX_MCP_HOST` to loopback / a trusted network. If you reverse-proxy only the browser routes (`/connect`, `/oauth/callback`), **deny public access to `/mcp` and `/health`** (agents such as ragchat should call `http://127.0.0.1:<port>/mcp` on the host). Exposing `/mcp` on the internet would let any caller use the shared vault after someone signs in.
-- Prefer **subdomain** public URLs for the Authorization Server. Path mounts work when the AS login form uses a relative POST and connect cookies use `Path` equal to the PUBLIC_URL pathname (avoids reverse-proxy cookie-path rewrites).
-- Reference production (HumaticAI): `https://humaticai.com/qobrix-mcp` + `https://humaticai.com/qobrix-oauth` (public surface is OAuth routes only; `/mcp` stays localhost).
+- **Single active session — one CRM identity per MCP process.** Whoever completes `/connect` last is the identity every tool call uses. Do not share one Mode C process across unrelated end users; use Mode B for per-request isolation, or run one process per tenant/user.
+- **`/mcp` has no client bearer.** Bind `QOBRIX_MCP_HOST` to loopback. If you reverse-proxy for browsers, **publish only `/connect` and `/oauth/callback`**; deny public `/mcp` and `/health` (e.g. Apache `Require all denied`). Agents such as ragchat must call `http://127.0.0.1:<port>/mcp` on the host.
+- **Host allowlist:** set `QOBRIX_MCP_ALLOWED_HOSTS` to the public hostname. Loopback Host values are merged automatically when bind host is loopback — otherwise ragchat gets `403 Invalid Host: 127.0.0.1`.
+- **Cookies:** connect cookie `Path` follows `QOBRIX_MCP_PUBLIC_URL` pathname (avoids reverse-proxy `ProxyPassReverseCookiePath` rewrites stealing `Path=/`).
+- **Proxies:** Express `trust proxy` is **2** (Cloudflare → Apache → Node) so rate-limit IP keying is correct.
+- Prefer **subdomain** URLs for the AS. Path mounts work when the AS issuer includes the path, login POST is relative, and well-known discovery is proxied carefully (see AS User Guide).
+- Reference production (HumaticAI): public OAuth routes under `https://humaticai.com/qobrix-mcp` + `https://humaticai.com/qobrix-oauth`; `/mcp` stays on localhost for Alex/ragchat.
 
 ### 5. Verify
 
@@ -201,15 +205,23 @@ curl -s http://127.0.0.1:3502/health
 # After a successful browser login:
 curl -s http://127.0.0.1:3502/health
 # {"ok":true,"auth":"oauth","connected":true,…}
+
+# Local agent path must succeed without a custom Host header:
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3502/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ragchat","version":"0"}}}'
+# → 200
 ```
 
 Automated smoke: `npm run test:oauth-modes`.
 
 ---
 
-## Caching (optional, all modes)
+## Caching & rate limits (optional)
 
-See [README — Caching](../README.md#caching). Defaults keep an in-memory LRU; set `QOBRIX_REDIS_URL` for a shared Redis tier.
+- Caching: [README — Caching](../README.md#caching). Defaults: in-memory LRU; set `QOBRIX_REDIS_URL` for shared Redis. Related: `QOBRIX_CACHE_ENABLED`, `QOBRIX_CACHE_TTL`, `QOBRIX_CACHE_MAX_ENTRIES`, `QOBRIX_REDIS_KEY_PREFIX`.
+- Rate limit: `QOBRIX_MCP_RATE_LIMIT` (default `300` req/min). Mode C also rate-limits `/connect` and `/oauth/callback` (`QOBRIX_MCP_OAUTH_RATE_LIMIT`, default `30`).
+- Output cap: `QOBRIX_MCP_MAX_RESULT_CHARS` (see README).
 
 ---
 

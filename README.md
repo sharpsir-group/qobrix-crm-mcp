@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Connect Claude, Cursor, and other MCP clients to your Qobrix real-estate CRM</strong> — listings, leads, viewings, offers, contracts, and activity in one read-only <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> layer.<br />
-  <strong>61 tools</strong> (CRM entities + AI relevance search + analytics + cache controls), <a href="https://www.reso.org/data-dictionary/">RESO Data Dictionary 2.0</a> workflows, optional <strong>Redis-backed response caching</strong>, <strong>three auth modes</strong> (stdio / headers / OAuth 2.1), and <strong>216 automated tests</strong>.
+  <strong>61 tools</strong> (CRM entities + AI relevance search + analytics + audit + cache controls), <a href="https://www.reso.org/data-dictionary/">RESO Data Dictionary 2.0</a> workflows, optional <strong>Redis-backed response caching</strong>, <strong>three auth modes</strong> (stdio / headers / OAuth 2.1), and <strong>217 automated tests</strong>.
 </p>
 
 <p align="center">
@@ -101,7 +101,7 @@ The server is organized around six RESO-aligned business processes. The LLM rece
 
 ### Tools at a Glance
 
-**57** read-only tools — CRM entities, schema discovery, **analytics** (`qobrix_count`, `qobrix_top_values`, `qobrix_top_records`, `qobrix_aggregate`), a flexible **deals** shortcut (`qobrix_deals`), **reporting** (`qobrix_timeseries`, `qobrix_funnel`, `qobrix_rep_scorecard`, `qobrix_stale_leads`, `qobrix_win_loss`, `qobrix_days_on_market`), **customer** intelligence (`qobrix_cohort`), and **cache** helpers (`qobrix_cache_stats`, `qobrix_cache_clear`):
+**61** read-only tools — CRM entities, schema discovery, **analytics** (`qobrix_count`, `qobrix_top_values`, `qobrix_top_records`, `qobrix_aggregate`), a flexible **deals** shortcut (`qobrix_deals`), **reporting** (`qobrix_timeseries`, `qobrix_funnel`, `qobrix_rep_scorecard`, `qobrix_stale_leads`, `qobrix_win_loss`, `qobrix_days_on_market`), **customer** intelligence (`qobrix_cohort`), **audit** / change history (`qobrix_get_changes`, `qobrix_search_changes`, `qobrix_field_change_history`, `qobrix_top_field_changers`), and **cache** helpers (`qobrix_cache_stats`, `qobrix_cache_clear`):
 
 | Entity Group | Tools | Capabilities |
 |-------------|-------|-------------|
@@ -123,6 +123,7 @@ The server is organized around six RESO-aligned business processes. The LLM rece
 | **Deals** | 1 | Flexible domain shortcut over the Contracts table (sales, rentals, listings, pipeline) with kind / contract_types[] / contract_statuses[] / date_field / min_price / party filters / summary block |
 | **Reporting** | 6 | Time-series with YoY (`qobrix_timeseries`), canonical sales funnel + conversion % (`qobrix_funnel`), per-rep scorecard / agent leaderboard (`qobrix_rep_scorecard`), silent-lead detection (`qobrix_stale_leads`), win-rate analytics (`qobrix_win_loss`), days-on-market (`qobrix_days_on_market`) |
 | **Customers** | 1 | Repeat-buyer / seller / lead cohorts (`qobrix_cohort`) — find contacts that appear on multiple closed deals or opportunities |
+| **Audit** | 4 | Per-record change log (`qobrix_get_changes`), cross-resource change search (`qobrix_search_changes`), field-level history (`qobrix_field_change_history`), top field changers (`qobrix_top_field_changers`) |
 | **Cache** | 2 | Stats and prefix or full invalidation for fresher reads |
 
 Every tool description includes its canonical workflow role, RESO equivalent, verified `include[]` options, FK resolution guidance, and search expression examples.
@@ -289,7 +290,7 @@ How Mode C works (MCP self-auth — northbound clients unchanged):
 - Not available as a public download and **not** something you can clone from GitHub.
 - Delivered and configured by our team **upon request** as an enterprise solution bundle.
 - No third-party OAuth servers — Mode C is hard-wired to this Enterprise OAuth solution only.
-- **Security:** Mode C uses a **single shared session** and leaves `/mcp` without a client bearer. Bind `QOBRIX_MCP_HOST=127.0.0.1` (or a trusted network) so only intended callers can use the vault.
+- **Security:** Mode C uses a **single shared session vault** (`session.enc`) and leaves `/mcp` without a client bearer. Bind `QOBRIX_MCP_HOST=127.0.0.1`. If you reverse-proxy for browsers, **publish only `/connect` and `/oauth/callback`** — deny public `/mcp` and `/health`. Local agents (ragchat) call `http://127.0.0.1:<port>/mcp`. When `ALLOWED_HOSTS` lists only the public hostname, loopback Host values (`127.0.0.1` / `localhost` / `::1`) are **auto-added** if the server binds to loopback. Connect cookie `Path` follows `PUBLIC_URL` pathname; Express `trust proxy` is `2` behind Cloudflare→Apache.
 
 **Ready to upgrade?** Contact [SharpSir Group](https://sharpsir.group) · [dev@sharpsir.group](mailto:dev@sharpsir.group) and ask for the **Qobrix CRM MCP Enterprise OAuth** bundle.
 
@@ -305,6 +306,8 @@ export QOBRIX_MCP_RESOURCE_URL=http://127.0.0.1:3502/mcp
 export QOBRIX_OAUTH_ISSUER=<issuer-from-enterprise-bundle>
 export QOBRIX_OAUTH_INTROSPECTION_SECRET=<shared-secret-from-bundle>
 export QOBRIX_MCP_STATE_SECRET=<16+-char-secret>
+export QOBRIX_MCP_DATA_DIR=./data/mcp-oauth
+export QOBRIX_MCP_ALLOWED_HOSTS=qobrix-mcp.example.com   # loopback Hosts auto-added when HOST is 127.0.0.1
 npm start
 ```
 
@@ -313,7 +316,9 @@ Mode C endpoints (after the Enterprise OAuth solution is paired):
 - `GET /connect?e=…` — start authorization (sets cookie, 302 to AS)
 - `GET /oauth/callback` — PKCE code exchange + session vault write
 - `GET /health` — includes `connected: true|false` for the session vault
-- Unauthenticated `/mcp` is intentional: tools surface the connect URL when needed
+- Unauthenticated `/mcp` is intentional for northbound clients: tools surface the connect URL when needed — keep `/mcp` on **localhost** in production
+
+See **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for Mode A → B → C step-by-step, reverse-proxy lockdown, and Host allowlist details.
 
 Register the remote MCP URL (`…/mcp`) in Claude / Cursor / ChatGPT / ragchat as a normal Streamable HTTP server (**no client-side OAuth provider required**). The MCP handles auth itself.
 
@@ -602,13 +607,13 @@ If you regularly hit the cap, that's a signal to use `fields[]` (whitelist colum
 
 ### Testing
 
-The project includes **214 automated tests** across **60** `describe` suites (integration, multi-step scenarios, RESO workflows, cache, relevance, and output-cap behaviour):
+The project includes **217 automated tests** across **61** `describe` suites (integration, multi-step scenarios, RESO workflows, cache, relevance, output-cap, and OAuth mode smoke):
 
 ```bash
 # Integration tests — individual tool mechanics
 npm test
 
-# Scenario tests — multi-step tool chains (18 real-world scenarios)
+# Scenario tests — multi-step tool chains (19 real-world scenarios)
 npm run test:scenarios
 
 # Workflow tests — canonical RE business processes (8 RESO-aligned suites)
@@ -623,6 +628,9 @@ npm run test:relevance
 # Format tests — output cap + truncation behaviour (no API needed)
 npm run test:format
 
+# OAuth modes smoke — Mode B header rejection + Mode C /connect elicitation path
+npm run test:oauth-modes
+
 # Run everything
 npm run test:all
 ```
@@ -630,11 +638,12 @@ npm run test:all
 | Suite | Tests | Coverage |
 |-------|-------|----------|
 | Integration | 70 | Every tool, pagination edge cases, include/fields mechanics, analytics + reporting tools |
-| Scenarios | 54 | Agent morning brief, buyer search, lead triage, FK chains, pipeline reports |
+| Scenarios | 55 | Agent morning brief, buyer search, lead triage, FK chains, pipeline reports |
 | Workflows | 39 | Listing lifecycle, lead funnel, sales pipeline, showing, transaction, media, activity, schema |
 | Cache | 22 | Read-through cache, single-flight coalescing, LRU eviction, key canonicalization, search-page keys (no live API) |
 | Relevance | 23 | Boost eval/score/rank (incl. opportunity/contact shapes), fields[]+boost union, DSL help text, search cache-key stability (no live API) |
 | Format | 5 | `formatResult` output cap, paginated truncation with `_truncated` marker, fallback trailer, env override (no live API) |
+| OAuth modes | 3 | Mode B without headers, Mode C `/mcp` without bearer, elicitation `/connect` URL |
 
 ---
 
@@ -675,6 +684,7 @@ src/
     ├── productivity.ts # qobrix_rep_scorecard
     ├── customers.ts  # qobrix_cohort (repeat buyers/sellers/leads)
     ├── cache.ts      # qobrix_cache_stats, qobrix_cache_clear
+    ├── audit.ts      # change log / field history / top changers
     └── meta.ts       # Schema discovery + qobrix_search_dsl_help
 test-suite/
 ├── integration.test.mjs  # Live API smoke tests

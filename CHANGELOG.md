@@ -16,6 +16,12 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
   `http://127.0.0.1:3502/mcp`) are not rejected with `403 Invalid Host` when the
   env list only names the public reverse-proxy hostname.
 
+### Docs
+
+- Refreshed [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) and README: **61** tools
+  (incl. Audit), **217** tests, Mode C reverse-proxy lockdown, Host allowlist,
+  cookie Path, and `trust proxy` guidance.
+
 ---
 
 ## [1.4.1] - 2026-07-12
