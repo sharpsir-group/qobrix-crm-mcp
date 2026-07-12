@@ -137,6 +137,15 @@ export async function startHttpServer(): Promise<void> {
       );
     }
 
+    // Tighter limit on the OAuth browser paths (code-exchange / connect start).
+    const oauthRouteLimit = rateLimit({
+      windowMs: 60_000,
+      max: Number(process.env.QOBRIX_MCP_OAUTH_RATE_LIMIT || 30),
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+    app.use(["/connect", "/oauth/callback"], oauthRouteLimit);
+
     app.get("/connect", async (req, res) => {
       const elicitationId = String(req.query.e || "").trim();
       if (!elicitationId) {

@@ -18,8 +18,16 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  unlinkSync,
+  renameSync,
+} from "node:fs";
+import { join } from "node:path";
+import type { OAuthMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthCredentials } from "./auth-context.js";
 import {
   fetchAuthorizationServerMetadata,
@@ -28,6 +36,7 @@ import {
 } from "./oauth-rs.js";
 
 const PENDING_TTL_MS = 10 * 60 * 1000;
+const AS_META_TTL_MS = 5 * 60 * 1000;
 const CONNECT_COOKIE = "qobrix_mcp_connect";
 const CLIENT_FILE = "oauth-client.json";
 const SESSION_FILE = "session.enc";
@@ -87,8 +96,34 @@ type SessionFile = {
 let _client: RegisteredClient | null = null;
 let _session: SessionRecord | null = null;
 let _sessionLoaded = false;
+/** Reusable pending connect so repeated cold tool calls share one /connect URL. */
+let _activePending: PendingConnect | null = null;
 const _pending = new Map<string, PendingConnect>(); // by elicitationId
 const _pendingByState = new Map<string, PendingConnect>();
+let _asMeta: { meta: OAuthMetadata; at: number; issuer: string } | null = null;
+
+async function getAsMetadata(issuer: URL): Promise<OAuthMetadata> {
+  const key = issuer.href.replace(/\/+$/, "");
+  if (
+    _asMeta &&
+    _asMeta.issuer === key &&
+    Date.now() - _asMeta.at < AS_META_TTL_MS
+  ) {
+    return _asMeta.meta;
+  }
+  const meta = await fetchAuthorizationServerMetadata(issuer);
+  _asMeta = { meta, at: Date.now(), issuer: key };
+  return meta;
+}
+
+function clearActivePending(pending: PendingConnect | null): void {
+  if (!pending) return;
+  if (_activePending?.elicitationId === pending.elicitationId) {
+    _activePending = null;
+  }
+  _pending.delete(pending.elicitationId);
+  _pendingByState.delete(pending.state);
+}
 
 function dataDir(): string {
   return (
@@ -236,8 +271,26 @@ function loadSession(): SessionRecord | null {
     _session = parsed.session;
     return _session;
   } catch (err) {
+    // Fail soft: rotated QOBRIX_MCP_STATE_SECRET or a corrupt file must not
+    // 500 every /mcp and /health request — force re-auth instead.
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to load Mode C session vault: ${msg}`);
+    process.stderr.write(
+      `[qobrix-crm-mcp] WARNING: session vault unreadable (${msg}); clearing and requiring re-auth\n`
+    );
+    _session = null;
+    try {
+      const broken = `${path}.broken.${Date.now()}`;
+      renameSync(path, broken);
+      // Best-effort cleanup of the renamed blob so secrets don't linger.
+      unlinkSync(broken);
+    } catch {
+      try {
+        unlinkSync(path);
+      } catch {
+        /* ignore */
+      }
+    }
+    return null;
   }
 }
 
@@ -282,10 +335,9 @@ export function registerElicitationNotifier(
 
 function purgeExpiredPending(): void {
   const now = Date.now();
-  for (const [id, p] of _pending.entries()) {
+  for (const p of [..._pending.values()]) {
     if (now - p.createdAt > PENDING_TTL_MS) {
-      _pending.delete(id);
-      _pendingByState.delete(p.state);
+      clearActivePending(p);
     }
   }
 }
@@ -306,7 +358,7 @@ export async function ensureClientRegistered(): Promise<RegisteredClient> {
     return existing;
   }
 
-  const meta = await fetchAuthorizationServerMetadata(issuer);
+  const meta = await getAsMetadata(issuer);
   const registerUrl =
     meta.registration_endpoint || new URL("/register", issuer).href;
 
@@ -353,6 +405,7 @@ export async function ensureClientRegistered(): Promise<RegisteredClient> {
 
 /**
  * Mint a single-use pending connect (PKCE + state + elicitationId).
+ * Reuses an active, unexpired pending so repeated cold tool calls share one URL.
  */
 export function beginConnect(): {
   elicitationId: string;
@@ -360,6 +413,17 @@ export function beginConnect(): {
   connectUrl: string;
 } {
   purgeExpiredPending();
+  if (
+    _activePending &&
+    Date.now() - _activePending.createdAt <= PENDING_TTL_MS
+  ) {
+    return {
+      elicitationId: _activePending.elicitationId,
+      state: _activePending.state,
+      connectUrl: connectUrlFor(_activePending.elicitationId),
+    };
+  }
+
   const elicitationId = randomBytes(16).toString("hex");
   const state = randomBytes(24).toString("base64url");
   const codeVerifier = randomBytes(32).toString("base64url");
@@ -371,11 +435,11 @@ export function beginConnect(): {
   };
   _pending.set(elicitationId, pending);
   _pendingByState.set(state, pending);
+  _activePending = pending;
   setTimeout(() => {
     const p = _pending.get(elicitationId);
     if (p && p.state === state) {
-      _pending.delete(elicitationId);
-      _pendingByState.delete(state);
+      clearActivePending(p);
     }
   }, PENDING_TTL_MS).unref?.();
 
@@ -401,8 +465,7 @@ export async function authorizeRedirect(elicitationId: string): Promise<{
     );
   }
   if (Date.now() - pending.createdAt > PENDING_TTL_MS) {
-    _pending.delete(elicitationId);
-    _pendingByState.delete(pending.state);
+    clearActivePending(pending);
     throw new Error(
       "Connect session expired. Ask the agent to request authorization again."
     );
@@ -410,7 +473,7 @@ export async function authorizeRedirect(elicitationId: string): Promise<{
 
   const client = await ensureClientRegistered();
   const { issuer, resourceServerUrl } = requireOAuthEnv();
-  const meta = await fetchAuthorizationServerMetadata(issuer);
+  const meta = await getAsMetadata(issuer);
   const authorizeEndpoint =
     meta.authorization_endpoint || new URL("/authorize", issuer).href;
 
@@ -434,7 +497,7 @@ async function introspectAccessToken(
   accessToken: string
 ): Promise<IntrospectionResult> {
   const { issuer, introspectionSecret, resourceServerUrl } = requireOAuthEnv();
-  const meta = await fetchAuthorizationServerMetadata(issuer);
+  const meta = await getAsMetadata(issuer);
   const endpoint =
     meta.introspection_endpoint || new URL("/introspect", issuer).href;
 
@@ -507,12 +570,11 @@ export async function handleCallback(opts: {
   }
 
   // Single-use: remove before network calls to prevent replay.
-  _pending.delete(pending.elicitationId);
-  _pendingByState.delete(pending.state);
+  clearActivePending(pending);
 
   const client = await ensureClientRegistered();
   const { issuer, resourceServerUrl } = requireOAuthEnv();
-  const meta = await fetchAuthorizationServerMetadata(issuer);
+  const meta = await getAsMetadata(issuer);
   const tokenEndpoint = meta.token_endpoint || new URL("/token", issuer).href;
 
   const body = new URLSearchParams({
@@ -601,7 +663,7 @@ export async function refreshIfNeeded(): Promise<AuthCredentials | null> {
   try {
     const client = await ensureClientRegistered();
     const { issuer, resourceServerUrl } = requireOAuthEnv();
-    const meta = await fetchAuthorizationServerMetadata(issuer);
+    const meta = await getAsMetadata(issuer);
     const tokenEndpoint = meta.token_endpoint || new URL("/token", issuer).href;
 
     const body = new URLSearchParams({
@@ -660,6 +722,8 @@ export function __resetOauthClientForTests(): void {
   _client = null;
   _session = null;
   _sessionLoaded = false;
+  _activePending = null;
+  _asMeta = null;
   _pending.clear();
   _pendingByState.clear();
 }
