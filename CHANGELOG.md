@@ -7,6 +7,22 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ---
 
+## [1.4.1] - 2026-07-12
+
+### Fixed
+
+- Mode C connect cookie `Path` now follows `QOBRIX_MCP_PUBLIC_URL` pathname so
+  reverse-proxy `ProxyPassReverseCookiePath` rewrites (e.g. `/` → `/eldes`) cannot
+  steal the OAuth state cookie on path-mounted deployments.
+- Set Express `trust proxy` when serving behind Apache/Cloudflare so
+  `express-rate-limit` accepts `X-Forwarded-For`.
+
+### Docs
+
+- Added [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) covering Modes A → B → C.
+
+---
+
 ## [1.4.0] - 2026-07-12
 
 ### Mode C self-service OAuth (standards-verified third-party auth)

@@ -4,3 +4,4 @@ dist/
 *.tsbuildinfo
 document.yaml
 data/
+ecosystem.config.cjs

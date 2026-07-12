@@ -85,6 +85,8 @@ export async function startHttpServer(): Promise<void> {
       ? process.env.QOBRIX_MCP_ALLOWED_HOSTS.split(",").map((s) => s.trim())
       : undefined,
   });
+  // Behind Apache/Cloudflare — required for express-rate-limit + X-Forwarded-For
+  app.set("trust proxy", 1);
 
   app.use(
     rateLimit({
@@ -157,9 +159,10 @@ export async function startHttpServer(): Promise<void> {
           await authorizeRedirect(elicitationId);
         const signed = signCookie(cookiePayload);
         const secure = publicUrlIsHttps();
+        const cookiePath = connectCookiePath();
         res.setHeader(
           "Set-Cookie",
-          `${connectCookieName()}=${encodeURIComponent(signed)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600${secure ? "; Secure" : ""}`
+          `${connectCookieName()}=${encodeURIComponent(signed)}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=600${secure ? "; Secure" : ""}`
         );
         res.redirect(302, authorizeUrl);
       } catch (err) {
@@ -190,7 +193,7 @@ export async function startHttpServer(): Promise<void> {
         // Clear connect cookie
         res.setHeader(
           "Set-Cookie",
-          `${connectCookieName()}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+          `${connectCookieName()}=; Path=${connectCookiePath()}; HttpOnly; SameSite=Lax; Max-Age=0`
         );
         res.status(200).send(successHtml(result.subject));
       } catch (e) {
@@ -342,4 +345,17 @@ function publicUrlIsHttps(): boolean {
     process.env.QOBRIX_MCP_PUBLIC_URL ||
     `http://127.0.0.1:${process.env.QOBRIX_MCP_PORT || "3502"}`;
   return raw.startsWith("https://");
+}
+
+/** Cookie Path from PUBLIC_URL pathname — avoids vhost-wide ProxyPassReverseCookiePath (/ → /eldes) stealing Path=/. */
+function connectCookiePath(): string {
+  try {
+    const raw =
+      process.env.QOBRIX_MCP_PUBLIC_URL ||
+      `http://127.0.0.1:${process.env.QOBRIX_MCP_PORT || "3502"}`;
+    const pathname = new URL(raw).pathname.replace(/\/+$/, "");
+    return pathname || "/";
+  } catch {
+    return "/";
+  }
 }

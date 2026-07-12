@@ -35,6 +35,7 @@
 
 ## Table of contents
 
+- [**User Guide**](docs/USER_GUIDE.md) — Mode A → Mode B → Mode C step-by-step
 - [What it does](#what-it-does)
 - [Who it is for](#who-it-is-for)
 - [Canonical real-estate workflows](#canonical-re-workflows)
