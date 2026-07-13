@@ -194,7 +194,7 @@ export class QobrixClient {
         (response.status === 401 || response.status === 403) &&
         resolveAuthMode() === "oauth"
       ) {
-        clearSession();
+        clearSession(); // scoped to current request vaultKey via ALS
         const { elicitationId, connectUrl } = beginConnect();
         throw new AuthRequiredError({
           elicitationId,

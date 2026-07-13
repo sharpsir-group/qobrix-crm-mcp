@@ -12,10 +12,11 @@
  * - A: process owner controls env secrets; one shared Qobrix identity.
  * - B: caller is trusted (same host / private network); credentials are
  *   request-scoped and must never be logged. Bind to 127.0.0.1 by default.
- * - C: MCP is the OAuth client + session holder. End-user authenticates at
- *   qobrix-crm-mcp-oauth; this server stores Qobrix API keys in an encrypted
- *   session vault. Single shared session — pin /mcp to loopback / trusted net.
- *   No third-party authorization servers.
+ * - C: MCP is the OAuth client + per-user session holder. End-user authenticates
+ *   at qobrix-crm-mcp-oauth; this server stores Qobrix API keys in encrypted
+ *   per-user session vaults keyed by chat identity (X-Chat-* headers). Pin /mcp
+ *   to loopback / trusted net and set QOBRIX_MCP_IDENTITY_SECRET so identity
+ *   headers cannot be forged. No third-party authorization servers.
  */
 
 export type AuthMode = "env" | "headers" | "oauth";
@@ -49,6 +50,6 @@ export function modeDescription(mode: AuthMode): string {
     case "headers":
       return "Mode B: per-request X-Api-User / X-Api-Key (trusted callers)";
     case "oauth":
-      return "Mode C: self-service OAuth client paired with qobrix-crm-mcp-oauth (auth URL via elicitation / tool result)";
+      return "Mode C: self-service OAuth client + per-user vaults (paired with qobrix-crm-mcp-oauth)";
   }
 }

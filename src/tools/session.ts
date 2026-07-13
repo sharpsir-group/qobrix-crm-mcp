@@ -4,6 +4,10 @@
  * - qobrix_sign_in  — start interactive OAuth connect (or report already signed in)
  * - qobrix_sign_out — full revoke (AS /disconnect + Qobrix api-key DELETE + local vault)
  * - qobrix_whoami   — current user profile + capabilities + portals
+ *
+ * Mode C vaults are per-user: keyed by the channel-native identity forwarded
+ * as X-Chat-* headers (individual human). Deliver /connect links only to that
+ * individual — never into a shared/group thread.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getAuthContext } from "../auth-context.js";
@@ -46,7 +50,9 @@ export function registerSessionTools(server: McpServer): void {
       "for the user to complete login + 2FA + consent. " +
       "When already connected, reports the current identity. " +
       "In Mode A/B this is a no-op — credentials come from env / request headers. " +
-      "Mode C uses a single shared session vault for this MCP process.",
+      "Mode C uses a per-user encrypted session vault keyed by the chat identity " +
+      "(X-Chat-Platform / X-Chat-User-Id). Deliver the Sign In link only to that " +
+      "individual — never post it into a shared/group thread.",
     SignInSchema.shape,
     async () => {
       try {
@@ -78,11 +84,11 @@ export function registerSessionTools(server: McpServer): void {
 
   server.tool(
     "qobrix_sign_out",
-    "Sign out of Qobrix (Mode C only). Fully revokes the session: " +
+    "Sign out of Qobrix (Mode C only). Fully revokes the current user's session: " +
       "calls the Authorization Server /disconnect (deletes the minted Qobrix API key " +
-      "and clears AS tokens/vault), then clears the local encrypted session vault. " +
-      "Mode C uses a single shared vault — this disconnects the shared identity for " +
-      "this MCP process. In Mode A/B there is no interactive session to clear.",
+      "and clears AS tokens/vault), then clears this user's local encrypted session vault. " +
+      "Other users' vaults on this MCP process are not affected. " +
+      "In Mode A/B there is no interactive session to clear.",
     SignOutSchema.shape,
     async () => {
       try {
@@ -100,7 +106,7 @@ export function registerSessionTools(server: McpServer): void {
           ok: true,
           message:
             "Signed out of Qobrix. The AS session was revoked, the minted API key " +
-            "was deleted (when possible), and the local vault was cleared.",
+            "was deleted (when possible), and your local vault was cleared.",
           ...result,
         });
       } catch (error) {
@@ -112,9 +118,10 @@ export function registerSessionTools(server: McpServer): void {
   server.tool(
     "qobrix_whoami",
     "Return the current Qobrix user profile, capabilities, and portals " +
-      "(GET /api/v2/session/). In Mode C with no session, surfaces a Sign In link " +
-      "so the user can authenticate first. Also includes the OAuth subject when " +
-      "available. Use to confirm which CRM identity the agent is acting as.",
+      "(GET /api/v2/session/). In Mode C with no session for this chat identity, " +
+      "surfaces a Sign In link so the user can authenticate first. Also includes " +
+      "the OAuth subject when available. Use to confirm which CRM identity the " +
+      "agent is acting as for this user.",
     WhoAmISchema.shape,
     async () => {
       try {

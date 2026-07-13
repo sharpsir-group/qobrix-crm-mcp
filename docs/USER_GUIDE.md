@@ -152,8 +152,11 @@ export QOBRIX_MCP_ALLOWED_HOSTS=qobrix-mcp.example.com
 
 export QOBRIX_OAUTH_ISSUER=https://qobrix-oauth.example.com
 export QOBRIX_OAUTH_INTROSPECTION_SECRET='<shared-long-secret>'
-export QOBRIX_MCP_STATE_SECRET='<16+-char-secret>'   # cookies + session vault
+export QOBRIX_MCP_STATE_SECRET='<16+-char-secret>'   # cookies + vault encryption (MCP-only)
+export QOBRIX_MCP_IDENTITY_SECRET='<16+-char-secret>' # signed X-Chat-* (shared with ragchat)
+# chmod 600 the file that holds these secrets (ecosystem.config / .env)
 export QOBRIX_MCP_DATA_DIR=./data/mcp-oauth          # persist across restarts
+# Optional: QOBRIX_MCP_MAX_VAULTS=500  QOBRIX_MCP_VAULT_IDLE_MS=2592000000
 
 # Local http:// issuer only (AS also auto-sets this for http: issuers):
 # export MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL=true
@@ -172,7 +175,13 @@ export MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL=true
 
 ### 2. What the user sees in chat
 
-1. Agent calls a CRM tool with no session (or calls **`qobrix_sign_in`** / **`qobrix_whoami`**).
+Mode C stores a **per-user** encrypted vault keyed by the chat identity the
+host forwards (`X-Chat-Platform` / `X-Chat-User-Id`, optionally signed with
+`QOBRIX_MCP_IDENTITY_SECRET`). Teams/Telegram/WhatsApp/web each map to their
+native individual id — signing in as Alice never overwrites Bob's vault.
+Deliver the Sign In link **only to that individual** (never into a group thread).
+
+1. Agent calls a CRM tool with no session for this user (or calls **`qobrix_sign_in`** / **`qobrix_whoami`**).
 2. MCP returns either:
    - **URL-mode elicitation** (`JSON-RPC -32042`) when the client supports `elicitation.url`, or
    - A Markdown **`[Sign In to Qobrix]({PUBLIC_URL}/connect?e=…)`** link (ragchat / LangChain fallback). The LLM must show that exact link (unique / single-use — never reuse a link from an earlier message).

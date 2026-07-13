@@ -24,12 +24,17 @@ import { runWithRequestContext } from "./request-context.js";
 import {
   authorizeRedirect,
   connectCookieName,
+  countSessionVaults,
   ensureClientRegistered,
   getSessionCredentials,
   handleCallback,
   refreshIfNeeded,
   signCookie,
 } from "./oauth-client.js";
+import {
+  resolveVaultKeyFromHeaders,
+  vaultKeyAuditHash,
+} from "./identity.js";
 import { errorHtml, successHtml } from "./auth-pages.js";
 
 const MCP_PATH = "/mcp";
@@ -94,7 +99,11 @@ export async function startHttpServer(): Promise<void> {
       auth: authMode,
       description: modeDescription(authMode),
       connected:
-        authMode === "oauth" ? Boolean(getSessionCredentials()) : undefined,
+        authMode === "oauth"
+          ? Boolean(getSessionCredentials())
+          : undefined,
+      session_vaults:
+        authMode === "oauth" ? countSessionVaults() : undefined,
     });
   });
 
@@ -115,7 +124,7 @@ export async function startHttpServer(): Promise<void> {
     requireOAuthEnv();
     if (!isLoopbackHost(host) && !process.env.QOBRIX_MCP_ALLOWED_HOSTS) {
       process.stderr.write(
-        "[qobrix-crm-mcp] WARNING: Mode C leaves /mcp unauthenticated to the MCP client and uses a single shared session vault. Bind QOBRIX_MCP_HOST to 127.0.0.1 (or set QOBRIX_MCP_ALLOWED_HOSTS) so only trusted callers can use the vault.\n"
+        "[qobrix-crm-mcp] WARNING: Mode C leaves /mcp unauthenticated to the MCP client and uses per-user session vaults keyed by identity headers. Bind QOBRIX_MCP_HOST to 127.0.0.1 (or set QOBRIX_MCP_ALLOWED_HOSTS) and configure QOBRIX_MCP_IDENTITY_SECRET so only trusted callers can select a vault.\n"
       );
     }
 
@@ -198,11 +207,10 @@ export async function startHttpServer(): Promise<void> {
   const servers = new WeakMap<StreamableHTTPServerTransport, McpServer>();
 
   const handleMcp = async (req: Request, res: Response): Promise<void> => {
-    let activeServer: McpServer | undefined;
-
-    const run = async () => {
+    const run = async (vaultKey = "default") => {
       const sessionId = req.headers["mcp-session-id"] as string | undefined;
       let transport: StreamableHTTPServerTransport | undefined;
+      let activeServer: McpServer | undefined;
 
       if (sessionId && transports.has(sessionId)) {
         transport = transports.get(sessionId);
@@ -244,20 +252,40 @@ export async function startHttpServer(): Promise<void> {
       // parsedBody as the message, so passing Express's `{}` on a GET/DELETE
       // would corrupt the SSE stream / delete handling.
       const parsedBody = req.method === "POST" ? req.body : undefined;
-      await runWithRequestContext({ mcpServer: activeServer }, async () => {
-        await transport!.handleRequest(req, res, parsedBody);
-      });
+      await runWithRequestContext(
+        { mcpServer: activeServer, vaultKey },
+        async () => {
+          await transport!.handleRequest(req, res, parsedBody);
+        }
+      );
     };
 
     if (authMode === "oauth") {
+      const { vaultKey, reason } = resolveVaultKeyFromHeaders({
+        platform: String(req.headers["x-chat-platform"] || ""),
+        userId: String(req.headers["x-chat-user-id"] || ""),
+        iat: String(req.headers["x-chat-identity-iat"] || ""),
+        exp: String(req.headers["x-chat-identity-exp"] || ""),
+        sig: String(req.headers["x-chat-identity-sig"] || ""),
+      });
+      if (reason === "bad-signature") {
+        process.stderr.write(
+          `[qobrix-crm-mcp] Rejected forged/unsigned identity; vault=default audit=${vaultKeyAuditHash(vaultKey)}\n`
+        );
+      } else if (req.method === "POST") {
+        process.stderr.write(
+          `[qobrix-crm-mcp] /mcp vault audit=${vaultKeyAuditHash(vaultKey)} reason=${reason}\n`
+        );
+      }
+
       // Self-service Mode C: no bearer required. Use vault creds when present.
-      let creds = await refreshIfNeeded();
-      if (!creds) creds = getSessionCredentials();
+      let creds = await refreshIfNeeded(vaultKey);
+      if (!creds) creds = getSessionCredentials(vaultKey);
       if (creds) {
-        await runWithAuthAsync(creds, run);
+        await runWithAuthAsync(creds, () => run(vaultKey));
       } else {
         // Unauthenticated marker path: tools raise AuthRequiredError → URL.
-        await run();
+        await run(vaultKey);
       }
       return;
     }
@@ -272,7 +300,7 @@ export async function startHttpServer(): Promise<void> {
         });
         return;
       }
-      await runWithAuthAsync(creds, run);
+      await runWithAuthAsync(creds, () => run());
       return;
     }
 

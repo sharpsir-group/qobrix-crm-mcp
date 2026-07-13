@@ -4,7 +4,8 @@
  * The MCP registers itself (DCR + PKCE) against the paired
  * qobrix-crm-mcp-oauth AS, drives /connect → authorize → /oauth/callback,
  * introspects the access token for Qobrix credentials, and stores them in
- * an encrypted single-slot session vault.
+ * a **per-user encrypted session vault** keyed by channel-native identity
+ * (`vaultKey`, typically `{platform}:{chatUserId}` from X-Chat-* headers).
  *
  * This is MCP "External (third-party) Authorization" (SEP-1036): northbound
  * clients never see Qobrix secrets — only a /connect URL.
@@ -15,6 +16,7 @@ import {
   createDecipheriv,
   createHash,
   createHmac,
+  hkdfSync,
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
@@ -25,21 +27,33 @@ import {
   existsSync,
   unlinkSync,
   renameSync,
+  readdirSync,
+  statSync,
 } from "node:fs";
 import { join } from "node:path";
 import type { OAuthMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthCredentials } from "./auth-context.js";
+import { DEFAULT_VAULT_KEY } from "./identity.js";
 import {
   fetchAuthorizationServerMetadata,
   requireOAuthEnv,
   type IntrospectionResult,
 } from "./oauth-rs.js";
+import { getRequestVaultKey } from "./request-context.js";
 
 const PENDING_TTL_MS = 10 * 60 * 1000;
 const AS_META_TTL_MS = 5 * 60 * 1000;
 const CONNECT_COOKIE = "qobrix_mcp_connect";
 const CLIENT_FILE = "oauth-client.json";
-const SESSION_FILE = "session.enc";
+/** Legacy single-slot vault (pre-1.6.0); migrated into sessions/ as `default`. */
+const LEGACY_SESSION_FILE = "session.enc";
+const SESSIONS_DIR = "sessions";
+const VAULT_HKDF_INFO = "qobrix-mcp-vault-v1";
+const REFRESH_SKEW_MS = 60_000;
+const PROACTIVE_REFRESH_RATIO = 0.8;
+const DEFAULT_MAX_VAULTS = 500;
+/** Idle vaults older than this are eligible for eviction (default 30 days). */
+const DEFAULT_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
 
 export class AuthRequiredError extends Error {
   readonly connectUrl: string;
@@ -72,6 +86,7 @@ type PendingConnect = {
   state: string;
   codeVerifier: string;
   createdAt: number;
+  vaultKey: string;
   /** Optional notifier to fire after successful callback (elicitation clients). */
   completionNotifier?: () => Promise<void>;
 };
@@ -85,21 +100,29 @@ type SessionRecord = {
   accessToken?: string;
   refreshToken?: string;
   accessExpiresAt?: number;
+  /** When the current access token was issued (for proactive 80% refresh). */
+  accessIssuedAt?: number;
+  /** Last successful use / refresh of this vault (idle eviction). */
+  lastAccessAt?: number;
   updatedAt: string;
 };
 
 type SessionFile = {
   version: 1;
+  vaultKey?: string;
   session: SessionRecord | null;
 };
 
 let _client: RegisteredClient | null = null;
-let _session: SessionRecord | null = null;
-let _sessionLoaded = false;
-/** Reusable pending connect so repeated cold tool calls share one /connect URL. */
-let _activePending: PendingConnect | null = null;
+/** In-memory vault cache keyed by vaultKey. */
+const _sessions = new Map<string, SessionRecord | null>();
+const _sessionsLoaded = new Set<string>();
+/** One reusable pending connect per vaultKey (unexpired). */
+const _activePendingByKey = new Map<string, PendingConnect>();
 const _pending = new Map<string, PendingConnect>(); // by elicitationId
 const _pendingByState = new Map<string, PendingConnect>();
+/** In-flight refresh promises — one per vaultKey (mutex). */
+const _refreshLocks = new Map<string, Promise<AuthCredentials | null>>();
 let _asMeta: { meta: OAuthMetadata; at: number; issuer: string } | null = null;
 
 async function getAsMetadata(issuer: URL): Promise<OAuthMetadata> {
@@ -118,8 +141,9 @@ async function getAsMetadata(issuer: URL): Promise<OAuthMetadata> {
 
 function clearActivePending(pending: PendingConnect | null): void {
   if (!pending) return;
-  if (_activePending?.elicitationId === pending.elicitationId) {
-    _activePending = null;
+  const active = _activePendingByKey.get(pending.vaultKey);
+  if (active?.elicitationId === pending.elicitationId) {
+    _activePendingByKey.delete(pending.vaultKey);
   }
   _pending.delete(pending.elicitationId);
   _pendingByState.delete(pending.state);
@@ -129,6 +153,10 @@ function dataDir(): string {
   return (
     process.env.QOBRIX_MCP_DATA_DIR || join(process.cwd(), "data", "mcp-oauth")
   );
+}
+
+function sessionsDir(): string {
+  return join(dataDir(), SESSIONS_DIR);
 }
 
 function stateSecret(): string {
@@ -144,8 +172,42 @@ function stateSecret(): string {
   return s;
 }
 
-function deriveKey(material: string): Buffer {
-  return createHash("sha256").update(material).digest();
+/** Normalize vault key; empty/null → default. */
+export function normalizeVaultKey(vaultKey?: string | null): string {
+  const k = (vaultKey || "").trim();
+  return k || DEFAULT_VAULT_KEY;
+}
+
+/** Resolve vault key for the current request (ALS) or explicit override. */
+export function currentVaultKey(override?: string | null): string {
+  if (override !== undefined && override !== null && String(override).trim()) {
+    return normalizeVaultKey(override);
+  }
+  return normalizeVaultKey(getRequestVaultKey());
+}
+
+/** Filename-safe hash of vaultKey (not the encryption key). */
+function vaultFileId(vaultKey: string): string {
+  return createHash("sha256").update(vaultKey).digest("hex").slice(0, 32);
+}
+
+function sessionPath(vaultKey: string): string {
+  return join(sessionsDir(), `${vaultFileId(vaultKey)}.enc`);
+}
+
+/**
+ * Per-vault DEK via HKDF(master=STATE_SECRET, salt=vaultKey).
+ * Distinct DEKs limit blast radius if a single ciphertext leaks.
+ */
+function deriveVaultDek(vaultKey: string): Buffer {
+  return Buffer.from(
+    hkdfSync("sha256", stateSecret(), vaultKey, VAULT_HKDF_INFO, 32)
+  );
+}
+
+/** Legacy single-key derivation (pre-1.6.0 session.enc). */
+function deriveLegacyKey(): Buffer {
+  return createHash("sha256").update(stateSecret()).digest();
 }
 
 function encryptJson(key: Buffer, plaintext: string): string {
@@ -166,6 +228,15 @@ function decryptJson(key: Buffer, blob: string): string {
   return Buffer.concat([decipher.update(data), decipher.final()]).toString(
     "utf8"
   );
+}
+
+/** Atomic write: temp file in same dir + rename. */
+function atomicWriteFile(path: string, contents: string): void {
+  const dir = join(path, "..");
+  mkdirSync(dir, { recursive: true });
+  const tmp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  writeFileSync(tmp, contents, { mode: 0o600 });
+  renameSync(tmp, path);
 }
 
 function publicBaseUrl(): string {
@@ -252,66 +323,240 @@ function persistRegisteredClient(client: RegisteredClient): void {
   _client = client;
 }
 
-function loadSession(): SessionRecord | null {
-  if (_sessionLoaded) return _session;
-  _sessionLoaded = true;
-  const path = join(dataDir(), SESSION_FILE);
-  if (!existsSync(path)) {
-    _session = null;
+function quarantineBrokenVault(path: string): void {
+  try {
+    const broken = `${path}.broken.${Date.now()}`;
+    renameSync(path, broken);
+    unlinkSync(broken);
+  } catch {
+    try {
+      unlinkSync(path);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function tryDecryptSession(
+  path: string,
+  key: Buffer
+): SessionRecord | null | undefined {
+  try {
+    const blob = readFileSync(path, "utf8").trim();
+    if (!blob) return null;
+    const parsed = JSON.parse(decryptJson(key, blob)) as SessionFile;
+    return parsed.session;
+  } catch {
+    return undefined; // undecryptable with this key
+  }
+}
+
+/**
+ * One-time migration: legacy `session.enc` → `sessions/<default>.enc`.
+ */
+function migrateLegacyDefaultVault(): SessionRecord | null {
+  const legacyPath = join(dataDir(), LEGACY_SESSION_FILE);
+  if (!existsSync(legacyPath)) return null;
+  const session = tryDecryptSession(legacyPath, deriveLegacyKey());
+  if (session === undefined) {
+    process.stderr.write(
+      "[qobrix-crm-mcp] WARNING: legacy session.enc unreadable; quarantining\n"
+    );
+    quarantineBrokenVault(legacyPath);
     return null;
   }
+  if (session === null) {
+    try {
+      unlinkSync(legacyPath);
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+  // Re-persist under keyed vault with HKDF DEK, then remove legacy file.
+  persistSession(session, DEFAULT_VAULT_KEY);
   try {
-    const key = deriveKey(stateSecret());
-    const blob = readFileSync(path, "utf8").trim();
-    if (!blob) {
-      _session = null;
+    unlinkSync(legacyPath);
+  } catch {
+    /* ignore */
+  }
+  process.stderr.write(
+    "[qobrix-crm-mcp] Migrated legacy session.enc → per-user default vault\n"
+  );
+  return session;
+}
+
+function loadSession(vaultKey?: string | null): SessionRecord | null {
+  const key = normalizeVaultKey(vaultKey ?? getRequestVaultKey());
+  if (_sessionsLoaded.has(key)) {
+    return _sessions.get(key) ?? null;
+  }
+  _sessionsLoaded.add(key);
+
+  const path = sessionPath(key);
+  if (existsSync(path)) {
+    const session = tryDecryptSession(path, deriveVaultDek(key));
+    if (session === undefined) {
+      const msg = "decrypt failed";
+      process.stderr.write(
+        `[qobrix-crm-mcp] WARNING: session vault unreadable (${msg}); clearing and requiring re-auth\n`
+      );
+      quarantineBrokenVault(path);
+      _sessions.set(key, null);
       return null;
     }
-    const parsed = JSON.parse(decryptJson(key, blob)) as SessionFile;
-    _session = parsed.session;
-    return _session;
-  } catch (err) {
-    // Fail soft: rotated QOBRIX_MCP_STATE_SECRET or a corrupt file must not
-    // 500 every /mcp and /health request — force re-auth instead.
-    const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `[qobrix-crm-mcp] WARNING: session vault unreadable (${msg}); clearing and requiring re-auth\n`
-    );
-    _session = null;
+    _sessions.set(key, session);
+    return session;
+  }
+
+  // Migrate legacy single vault only for the default key.
+  if (key === DEFAULT_VAULT_KEY) {
+    const migrated = migrateLegacyDefaultVault();
+    if (migrated) {
+      _sessions.set(key, migrated);
+      return migrated;
+    }
+  }
+
+  _sessions.set(key, null);
+  return null;
+}
+
+function maxVaults(): number {
+  const n = Number(process.env.QOBRIX_MCP_MAX_VAULTS || DEFAULT_MAX_VAULTS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_MAX_VAULTS;
+}
+
+function idleTtlMs(): number {
+  const n = Number(process.env.QOBRIX_MCP_VAULT_IDLE_MS || DEFAULT_IDLE_MS);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_IDLE_MS;
+}
+
+type VaultMeta = {
+  vaultKeyHint: string; // file id
+  path: string;
+  mtimeMs: number;
+};
+
+function listVaultFiles(): VaultMeta[] {
+  const dir = sessionsDir();
+  if (!existsSync(dir)) return [];
+  const out: VaultMeta[] = [];
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".enc") || name.includes(".tmp") || name.includes(".broken.")) {
+      continue;
+    }
+    const path = join(dir, name);
     try {
-      const broken = `${path}.broken.${Date.now()}`;
-      renameSync(path, broken);
-      // Best-effort cleanup of the renamed blob so secrets don't linger.
-      unlinkSync(broken);
+      const st = statSync(path);
+      out.push({
+        vaultKeyHint: name.replace(/\.enc$/, ""),
+        path,
+        mtimeMs: st.mtimeMs,
+      });
     } catch {
+      /* skip */
+    }
+  }
+  return out;
+}
+
+/**
+ * Evict idle / expired-refresh vaults and enforce MAX_VAULTS (LRU by mtime).
+ * Never evicts the vault currently being written.
+ */
+function evictVaultsIfNeeded(preserveKey: string): void {
+  const files = listVaultFiles();
+  const now = Date.now();
+  const idleMs = idleTtlMs();
+  const preserveId = vaultFileId(preserveKey);
+
+  for (const f of files) {
+    if (f.vaultKeyHint === preserveId) continue;
+    // Idle by mtime
+    if (now - f.mtimeMs > idleMs) {
       try {
-        unlinkSync(path);
+        unlinkSync(f.path);
       } catch {
         /* ignore */
       }
+      continue;
     }
-    return null;
+  }
+
+  // Re-list after idle sweep; LRU trim to max.
+  let remaining = listVaultFiles().filter((f) => f.vaultKeyHint !== preserveId);
+  const cap = maxVaults();
+  // Cap includes the preserved vault slot.
+  while (remaining.length >= cap) {
+    remaining.sort((a, b) => a.mtimeMs - b.mtimeMs);
+    const oldest = remaining.shift();
+    if (!oldest) break;
+    try {
+      unlinkSync(oldest.path);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
-function persistSession(session: SessionRecord | null): void {
-  const key = deriveKey(stateSecret());
-  const file: SessionFile = { version: 1, session };
-  const blob = encryptJson(key, JSON.stringify(file));
-  mkdirSync(dataDir(), { recursive: true });
-  writeFileSync(join(dataDir(), SESSION_FILE), blob, { mode: 0o600 });
-  _session = session;
-  _sessionLoaded = true;
+function persistSession(
+  session: SessionRecord | null,
+  vaultKey?: string | null
+): void {
+  const key = normalizeVaultKey(vaultKey ?? getRequestVaultKey());
+  const path = sessionPath(key);
+  if (session === null) {
+    _sessions.set(key, null);
+    _sessionsLoaded.add(key);
+    try {
+      if (existsSync(path)) unlinkSync(path);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+
+  const now = Date.now();
+  const enriched: SessionRecord = {
+    ...session,
+    lastAccessAt: session.lastAccessAt ?? now,
+    updatedAt: session.updatedAt || new Date().toISOString(),
+  };
+
+  const dek = deriveVaultDek(key);
+  const file: SessionFile = { version: 1, vaultKey: key, session: enriched };
+  const blob = encryptJson(dek, JSON.stringify(file));
+  mkdirSync(sessionsDir(), { recursive: true });
+  atomicWriteFile(path, blob);
+  _sessions.set(key, enriched);
+  _sessionsLoaded.add(key);
+  try {
+    evictVaultsIfNeeded(key);
+  } catch {
+    /* eviction best-effort */
+  }
 }
 
-export function isConnected(): boolean {
-  const s = loadSession();
+/** Count on-disk vault files (for /health). */
+export function countSessionVaults(): number {
+  return listVaultFiles().length;
+}
+
+export function isConnected(vaultKey?: string | null): boolean {
+  const s = loadSession(vaultKey);
   return Boolean(s?.apiUser && s?.apiKey);
 }
 
-export function getSessionCredentials(): AuthCredentials | null {
-  const s = loadSession();
+export function getSessionCredentials(
+  vaultKey?: string | null
+): AuthCredentials | null {
+  const key = normalizeVaultKey(vaultKey ?? getRequestVaultKey());
+  const s = loadSession(key);
   if (!s?.apiUser || !s?.apiKey) return null;
+  // Touch lastAccessAt in memory (persisted on next write/refresh).
+  s.lastAccessAt = Date.now();
+  _sessions.set(key, s);
   return {
     apiUser: s.apiUser,
     apiKey: s.apiKey,
@@ -321,25 +566,28 @@ export function getSessionCredentials(): AuthCredentials | null {
   };
 }
 
-export function clearSession(): void {
-  persistSession(null);
+export function clearSession(vaultKey?: string | null): void {
+  persistSession(null, vaultKey);
 }
 
 /**
  * Full Mode C disconnect: revoke at the AS (deletes minted Qobrix API key +
  * AS vault/tokens), fall back to direct Qobrix api-key DELETE if needed, then
- * clear the local session vault.
+ * clear the local session vault for this vaultKey.
  */
-export async function revokeSession(): Promise<{
+export async function revokeSession(
+  vaultKey?: string | null
+): Promise<{
   revoked: boolean;
   asDisconnect: boolean;
   qobrixKeyDeleted: boolean;
 }> {
+  const key = normalizeVaultKey(vaultKey ?? getRequestVaultKey());
   // Snapshot before refresh — refreshIfNeeded() clears the vault on failure,
   // which would otherwise skip the Qobrix key DELETE fallback.
-  const before = loadSession();
+  const before = loadSession(key);
   if (!before?.apiUser || !before?.apiKey) {
-    clearSession();
+    clearSession(key);
     return { revoked: false, asDisconnect: false, qobrixKeyDeleted: false };
   }
   const snapshot = {
@@ -353,8 +601,8 @@ export async function revokeSession(): Promise<{
   };
 
   // Best-effort refresh so /disconnect gets a currently-valid Bearer token.
-  await refreshIfNeeded();
-  const after = loadSession();
+  await refreshIfNeeded(key);
+  const after = loadSession(key);
   const accessToken = after?.accessToken || snapshot.accessToken;
 
   let asDisconnect = false;
@@ -416,7 +664,7 @@ export async function revokeSession(): Promise<{
     }
   }
 
-  clearSession();
+  clearSession(key);
   return {
     revoked: true,
     asDisconnect,
@@ -503,23 +751,23 @@ export async function ensureClientRegistered(): Promise<RegisteredClient> {
 }
 
 /**
- * Mint a single-use pending connect (PKCE + state + elicitationId).
- * Reuses an active, unexpired pending so repeated cold tool calls share one URL.
+ * Mint a pending connect (PKCE + state + elicitationId) bound to vaultKey.
+ * Reuses an active, unexpired pending for the same vaultKey so repeated cold
+ * tool calls share one URL. Do not log the full connect URL (capability URL).
  */
-export function beginConnect(): {
+export function beginConnect(vaultKey?: string | null): {
   elicitationId: string;
   state: string;
   connectUrl: string;
 } {
+  const key = normalizeVaultKey(vaultKey ?? getRequestVaultKey());
   purgeExpiredPending();
-  if (
-    _activePending &&
-    Date.now() - _activePending.createdAt <= PENDING_TTL_MS
-  ) {
+  const active = _activePendingByKey.get(key);
+  if (active && Date.now() - active.createdAt <= PENDING_TTL_MS) {
     return {
-      elicitationId: _activePending.elicitationId,
-      state: _activePending.state,
-      connectUrl: connectUrlFor(_activePending.elicitationId),
+      elicitationId: active.elicitationId,
+      state: active.state,
+      connectUrl: connectUrlFor(active.elicitationId),
     };
   }
 
@@ -531,10 +779,11 @@ export function beginConnect(): {
     state,
     codeVerifier,
     createdAt: Date.now(),
+    vaultKey: key,
   };
   _pending.set(elicitationId, pending);
   _pendingByState.set(state, pending);
-  _activePending = pending;
+  _activePendingByKey.set(key, pending);
   setTimeout(() => {
     const p = _pending.get(elicitationId);
     if (p && p.state === state) {
@@ -630,7 +879,6 @@ async function introspectAccessToken(
     const expected = resourceServerUrl.href.replace(/\/+$/, "");
     const got = String(aud).replace(/\/+$/, "");
     if (got !== expected && !got.startsWith(expected)) {
-      // allow trailing path differences via check in oauth-rs; keep soft here
       process.stderr.write(
         `[qobrix-crm-mcp] WARNING: token aud ${got} != resource ${expected}\n`
       );
@@ -641,19 +889,18 @@ async function introspectAccessToken(
 }
 
 /**
- * Handle AS redirect: verify state + cookie binding, exchange code, vault creds.
+ * Handle AS redirect: verify state + cookie binding, exchange code, vault creds
+ * into the pending flow's vaultKey. elicitationId is one-time-use (removed
+ * before network I/O to prevent replay).
  */
 export async function handleCallback(opts: {
   code: string;
   state: string;
   cookieHeader?: string;
-}): Promise<{ elicitationId: string; subject?: string }> {
+}): Promise<{ elicitationId: string; subject?: string; vaultKey: string }> {
   purgeExpiredPending();
 
-  const cookieRaw = parseCookieHeader(
-    opts.cookieHeader,
-    CONNECT_COOKIE
-  );
+  const cookieRaw = parseCookieHeader(opts.cookieHeader, CONNECT_COOKIE);
   const cookieState = verifySignedCookie(cookieRaw);
   if (!cookieState || !safeEqual(cookieState, opts.state)) {
     throw new Error(
@@ -669,6 +916,7 @@ export async function handleCallback(opts: {
   }
 
   // Single-use: remove before network calls to prevent replay.
+  const vaultKey = pending.vaultKey;
   clearActivePending(pending);
 
   const client = await ensureClientRegistered();
@@ -712,24 +960,30 @@ export async function handleCallback(opts: {
   }
 
   const intro = await introspectAccessToken(tokens.access_token);
+  const issuedAt = Date.now();
   const expiresAt =
     typeof tokens.expires_in === "number"
-      ? Date.now() + tokens.expires_in * 1000
+      ? issuedAt + tokens.expires_in * 1000
       : intro.exp
         ? intro.exp * 1000
         : undefined;
 
-  persistSession({
-    apiUser: intro.qobrix_api_user!,
-    apiKey: intro.qobrix_api_key!,
-    apiUrl: intro.qobrix_api_url,
-    locale: intro.qobrix_locale,
-    subject: intro.sub,
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    accessExpiresAt: expiresAt,
-    updatedAt: new Date().toISOString(),
-  });
+  persistSession(
+    {
+      apiUser: intro.qobrix_api_user!,
+      apiKey: intro.qobrix_api_key!,
+      apiUrl: intro.qobrix_api_url,
+      locale: intro.qobrix_locale,
+      subject: intro.sub,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      accessExpiresAt: expiresAt,
+      accessIssuedAt: issuedAt,
+      lastAccessAt: issuedAt,
+      updatedAt: new Date().toISOString(),
+    },
+    vaultKey
+  );
 
   if (pending.completionNotifier) {
     pending.completionNotifier().catch((err) => {
@@ -740,23 +994,32 @@ export async function handleCallback(opts: {
     });
   }
 
-  return { elicitationId: pending.elicitationId, subject: intro.sub };
+  return {
+    elicitationId: pending.elicitationId,
+    subject: intro.sub,
+    vaultKey,
+  };
 }
 
-/**
- * Refresh access token if near expiry; returns session credentials or null.
- */
-export async function refreshIfNeeded(): Promise<AuthCredentials | null> {
-  const s = loadSession();
-  if (!s?.apiUser || !s?.apiKey) return null;
+function needsTokenRefresh(s: SessionRecord): boolean {
+  if (!s.refreshToken || !s.accessExpiresAt) return false;
+  const now = Date.now();
+  // Proactive refresh at ~80% of access-token lifetime when issuedAt known.
+  if (s.accessIssuedAt && s.accessExpiresAt > s.accessIssuedAt) {
+    const ttl = s.accessExpiresAt - s.accessIssuedAt;
+    const proactiveAt = s.accessIssuedAt + Math.floor(ttl * PROACTIVE_REFRESH_RATIO);
+    return now >= proactiveAt;
+  }
+  // Legacy records: refresh within 60s of expiry.
+  return s.accessExpiresAt - now <= REFRESH_SKEW_MS;
+}
 
-  const skewMs = 60_000;
-  if (
-    !s.refreshToken ||
-    !s.accessExpiresAt ||
-    s.accessExpiresAt - Date.now() > skewMs
-  ) {
-    return getSessionCredentials();
+async function doRefresh(vaultKey: string): Promise<AuthCredentials | null> {
+  // Double-checked read under the caller's mutex slot.
+  const s = loadSession(vaultKey);
+  if (!s?.apiUser || !s?.apiKey) return null;
+  if (!needsTokenRefresh(s)) {
+    return getSessionCredentials(vaultKey);
   }
 
   try {
@@ -767,7 +1030,7 @@ export async function refreshIfNeeded(): Promise<AuthCredentials | null> {
 
     const body = new URLSearchParams({
       grant_type: "refresh_token",
-      refresh_token: s.refreshToken,
+      refresh_token: s.refreshToken!,
       client_id: client.client_id,
       resource: resourceServerUrl.href,
     });
@@ -785,7 +1048,7 @@ export async function refreshIfNeeded(): Promise<AuthCredentials | null> {
     });
 
     if (!tokenRes.ok) {
-      clearSession();
+      clearSession(vaultKey);
       return null;
     }
 
@@ -795,34 +1058,67 @@ export async function refreshIfNeeded(): Promise<AuthCredentials | null> {
       expires_in?: number;
     };
     const intro = await introspectAccessToken(tokens.access_token);
-    persistSession({
-      apiUser: intro.qobrix_api_user!,
-      apiKey: intro.qobrix_api_key!,
-      apiUrl: intro.qobrix_api_url,
-      locale: intro.qobrix_locale,
-      subject: intro.sub,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || s.refreshToken,
-      accessExpiresAt:
-        typeof tokens.expires_in === "number"
-          ? Date.now() + tokens.expires_in * 1000
-          : undefined,
-      updatedAt: new Date().toISOString(),
-    });
-    return getSessionCredentials();
+    const issuedAt = Date.now();
+    persistSession(
+      {
+        apiUser: intro.qobrix_api_user!,
+        apiKey: intro.qobrix_api_key!,
+        apiUrl: intro.qobrix_api_url,
+        locale: intro.qobrix_locale,
+        subject: intro.sub,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token || s.refreshToken,
+        accessExpiresAt:
+          typeof tokens.expires_in === "number"
+            ? issuedAt + tokens.expires_in * 1000
+            : undefined,
+        accessIssuedAt: issuedAt,
+        lastAccessAt: issuedAt,
+        updatedAt: new Date().toISOString(),
+      },
+      vaultKey
+    );
+    return getSessionCredentials(vaultKey);
   } catch {
-    clearSession();
+    clearSession(vaultKey);
     return null;
   }
 }
 
-/** Test helper — wipe in-memory + on-disk Mode C state. */
+/**
+ * Refresh access token if near / past 80% TTL; returns session credentials or null.
+ * Serialized per vaultKey (mutex) so concurrent tool calls share one AS refresh.
+ */
+export async function refreshIfNeeded(
+  vaultKey?: string | null
+): Promise<AuthCredentials | null> {
+  const key = normalizeVaultKey(vaultKey ?? getRequestVaultKey());
+  const inFlight = _refreshLocks.get(key);
+  if (inFlight) return inFlight;
+
+  const p = doRefresh(key).finally(() => {
+    _refreshLocks.delete(key);
+  });
+  _refreshLocks.set(key, p);
+  return p;
+}
+
+/** Test helper — wipe in-memory + on-disk Mode C state (tests only). */
 export function __resetOauthClientForTests(): void {
   _client = null;
-  _session = null;
-  _sessionLoaded = false;
-  _activePending = null;
+  _sessions.clear();
+  _sessionsLoaded.clear();
+  _activePendingByKey.clear();
   _asMeta = null;
   _pending.clear();
   _pendingByState.clear();
+  _refreshLocks.clear();
+}
+
+/** Test helper — write a vault record without going through OAuth. */
+export function __persistSessionForTests(
+  session: SessionRecord | null,
+  vaultKey: string
+): void {
+  persistSession(session, vaultKey);
 }

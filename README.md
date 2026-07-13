@@ -293,7 +293,19 @@ How Mode C works (MCP self-auth — northbound clients unchanged):
 - Not available as a public download and **not** something you can clone from GitHub.
 - Delivered and configured by our team **upon request** as an enterprise solution bundle.
 - No third-party OAuth servers — Mode C is hard-wired to this Enterprise OAuth solution only.
-- **Security:** Mode C uses a **single shared session vault** (`session.enc`) and leaves `/mcp` without a client bearer. Bind `QOBRIX_MCP_HOST=127.0.0.1`. If you reverse-proxy for browsers, **publish only `/connect` and `/oauth/callback`** — deny public `/mcp` and `/health`. Local agents (ragchat) call `http://127.0.0.1:<port>/mcp`. When `ALLOWED_HOSTS` lists only the public hostname, loopback Host values (`127.0.0.1` / `localhost` / `::1`) are **auto-added** if the server binds to loopback. Connect cookie `Path` follows `PUBLIC_URL` pathname; Express `trust proxy` is `2` behind Cloudflare→Apache.
+- **Security:** Mode C uses **per-user encrypted session vaults** (keyed by
+  chat identity headers) and leaves `/mcp` without a client bearer. Bind
+  `QOBRIX_MCP_HOST=127.0.0.1` and set `QOBRIX_MCP_IDENTITY_SECRET` (shared only
+  with the trusted MCP host like ragchat) so identity headers cannot be forged.
+  Keep vault encryption on `QOBRIX_MCP_STATE_SECRET` (MCP-only). If you
+  reverse-proxy for browsers, **publish only `/connect` and `/oauth/callback`**
+  — deny public `/mcp` and `/health`. Local agents (ragchat) call
+  `http://127.0.0.1:<port>/mcp`. When `ALLOWED_HOSTS` lists only the public
+  hostname, loopback Host values (`127.0.0.1` / `localhost` / `::1`) are
+  **auto-added** if the server binds to loopback. Connect cookie `Path`
+  follows `PUBLIC_URL` pathname; Express `trust proxy` is `2` behind
+  Cloudflare→Apache. Deliver `/connect` links only to the individual user —
+  never into a shared/group thread.
 
 **Ready to upgrade?** Contact [SharpSir Group](https://sharpsir.group) · [dev@sharpsir.group](mailto:dev@sharpsir.group) and ask for the **Qobrix CRM MCP Enterprise OAuth** bundle.
 
@@ -309,6 +321,7 @@ export QOBRIX_MCP_RESOURCE_URL=http://127.0.0.1:3502/mcp
 export QOBRIX_OAUTH_ISSUER=<issuer-from-enterprise-bundle>
 export QOBRIX_OAUTH_INTROSPECTION_SECRET=<shared-secret-from-bundle>
 export QOBRIX_MCP_STATE_SECRET=<16+-char-secret>
+export QOBRIX_MCP_IDENTITY_SECRET=<16+-char-secret-shared-with-ragchat>
 export QOBRIX_MCP_DATA_DIR=./data/mcp-oauth
 export QOBRIX_MCP_ALLOWED_HOSTS=qobrix-mcp.example.com   # loopback Hosts auto-added when HOST is 127.0.0.1
 npm start
@@ -317,8 +330,8 @@ npm start
 Mode C endpoints (after the Enterprise OAuth solution is paired):
 
 - `GET /connect?e=…` — start authorization (sets cookie, 302 to AS)
-- `GET /oauth/callback` — PKCE code exchange + session vault write
-- `GET /health` — includes `connected: true|false` for the session vault
+- `GET /oauth/callback` — PKCE code exchange + per-user session vault write
+- `GET /health` — includes `connected` and `session_vaults` count
 - Unauthenticated `/mcp` is intentional for northbound clients: tools surface the connect URL when needed — keep `/mcp` on **localhost** in production
 
 See **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for Mode A → B → C step-by-step, reverse-proxy lockdown, and Host allowlist details.

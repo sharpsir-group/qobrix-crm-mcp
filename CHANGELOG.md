@@ -7,6 +7,39 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ---
 
+## [1.6.0] - 2026-07-13
+
+### Added
+
+- **Per-user Mode C session vaults**: encrypted vaults under `data/mcp-oauth/sessions/`
+  keyed by chat identity (`{platform}:{userId}` from `X-Chat-Platform` /
+  `X-Chat-User-Id`). Each human (Teams AAD oid, Telegram user id, WhatsApp
+  phone, web user id) has an isolated Qobrix login — last-login-wins is gone.
+- **Signed identity assertion**: optional `QOBRIX_MCP_IDENTITY_SECRET` (16+)
+  verifies `X-Chat-Identity-{Iat,Exp,Sig}` so a forged user-id header cannot
+  select another vault. Dedicated secret — separate from vault-encryption
+  `QOBRIX_MCP_STATE_SECRET`.
+- Per-vault DEK via HKDF; atomic vault writes; per-vault refresh mutex with
+  proactive refresh at ~80% access-token TTL; idle/LRU vault eviction
+  (`QOBRIX_MCP_MAX_VAULTS`, `QOBRIX_MCP_VAULT_IDLE_MS`).
+- `/health` reports `session_vaults` count; audit logs use a hashed vault key.
+
+### Changed
+
+- Legacy single-slot `session.enc` migrates into the `default` vault on first use.
+- `qobrix_sign_in` / `qobrix_sign_out` / `qobrix_whoami` operate on the current
+  request's vault only. Deliver `/connect` links only to the individual — never
+  into a shared/group thread.
+- Mode C docs: pin `/mcp` to loopback, set identity secret, chmod secrets to 600.
+
+### Security
+
+- Rotating `QOBRIX_MCP_IDENTITY_SECRET` invalidates in-flight signed headers only
+  (no user re-auth). Rotating `QOBRIX_MCP_STATE_SECRET` invalidates all vaults
+  and connect cookies (users re-auth). Never log either secret or full connect URLs.
+
+---
+
 ## [1.5.3] - 2026-07-12
 
 ### Changed
