@@ -145,4 +145,38 @@ describe("Mode C per-user vaults + identity", () => {
       .digest("base64url");
     assert.equal(signed.sig, expected);
   });
+
+  it("shouldClearVaultOnRefreshFailure: transient keeps vault when stillValid", () => {
+    assert.equal(
+      oauth.shouldClearVaultOnRefreshFailure({
+        stillValid: true,
+        errorBody: "HTTP 503 service unavailable",
+      }),
+      false
+    );
+    assert.equal(
+      oauth.shouldClearVaultOnRefreshFailure({
+        stillValid: true,
+        errorBody: '{"error":"temporarily_unavailable"}',
+      }),
+      false
+    );
+  });
+
+  it("shouldClearVaultOnRefreshFailure: invalid_grant or expired clears", () => {
+    assert.equal(
+      oauth.shouldClearVaultOnRefreshFailure({
+        stillValid: true,
+        errorBody: '{"error":"invalid_grant","error_description":"revoked"}',
+      }),
+      true
+    );
+    assert.equal(
+      oauth.shouldClearVaultOnRefreshFailure({
+        stillValid: false,
+        errorBody: "HTTP 500",
+      }),
+      true
+    );
+  });
 });

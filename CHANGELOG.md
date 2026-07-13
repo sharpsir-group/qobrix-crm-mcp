@@ -7,6 +7,25 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ---
 
+## [1.6.1] - 2026-07-13
+
+### Fixed
+
+- **Proactive refresh no longer wipes valid vaults**: at 80% access-token TTL a
+  transient AS failure (`5xx`, network blip) previously called `clearSession`
+  and forced every active user to re-auth. Refresh now clears only on
+  `invalid_grant` or when the access token is already past skew; otherwise the
+  vault is kept and Qobrix `401/403` remains the authoritative clear path.
+
+### Changed
+
+- Vault eviction is throttled to ~once/60s (immediate when over `MAX_VAULTS`).
+- `/health` `connected` tracks `session_vaults > 0` (not only the `default` vault).
+- Per-request vault audit stderr is gated behind `QOBRIX_MCP_DEBUG=1`; forged
+  identity warnings still always log.
+
+---
+
 ## [1.6.0] - 2026-07-13
 
 ### Added

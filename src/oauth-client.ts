@@ -461,13 +461,24 @@ function listVaultFiles(): VaultMeta[] {
   return out;
 }
 
+const EVICT_THROTTLE_MS = 60_000;
+let _lastEvictAt = 0;
+
 /**
  * Evict idle / expired-refresh vaults and enforce MAX_VAULTS (LRU by mtime).
  * Never evicts the vault currently being written.
+ * Throttled to ~once/60s unless already over the vault cap (forces immediate run).
  */
 function evictVaultsIfNeeded(preserveKey: string): void {
-  const files = listVaultFiles();
   const now = Date.now();
+  const files = listVaultFiles();
+  const cap = maxVaults();
+  const overCap = files.length > cap;
+  if (!overCap && now - _lastEvictAt < EVICT_THROTTLE_MS) {
+    return;
+  }
+  _lastEvictAt = now;
+
   const idleMs = idleTtlMs();
   const preserveId = vaultFileId(preserveKey);
 
@@ -486,7 +497,6 @@ function evictVaultsIfNeeded(preserveKey: string): void {
 
   // Re-list after idle sweep; LRU trim to max.
   let remaining = listVaultFiles().filter((f) => f.vaultKeyHint !== preserveId);
-  const cap = maxVaults();
   // Cap includes the preserved vault slot.
   while (remaining.length >= cap) {
     remaining.sort((a, b) => a.mtimeMs - b.mtimeMs);
@@ -1014,6 +1024,20 @@ function needsTokenRefresh(s: SessionRecord): boolean {
   return s.accessExpiresAt - now <= REFRESH_SKEW_MS;
 }
 
+/**
+ * Whether a failed refresh should destroy the vault.
+ * Proactive 80%-TTL refresh must not wipe a still-valid access token /
+ * minted Qobrix key on transient AS failures — only dead refresh tokens
+ * (invalid_grant) or already-expired access tokens force clear.
+ */
+export function shouldClearVaultOnRefreshFailure(opts: {
+  stillValid: boolean;
+  errorBody: string;
+}): boolean {
+  const deadRefresh = /invalid_grant/i.test(opts.errorBody || "");
+  return deadRefresh || !opts.stillValid;
+}
+
 async function doRefresh(vaultKey: string): Promise<AuthCredentials | null> {
   // Double-checked read under the caller's mutex slot.
   const s = loadSession(vaultKey);
@@ -1021,6 +1045,10 @@ async function doRefresh(vaultKey: string): Promise<AuthCredentials | null> {
   if (!needsTokenRefresh(s)) {
     return getSessionCredentials(vaultKey);
   }
+
+  const stillValid =
+    typeof s.accessExpiresAt === "number" &&
+    s.accessExpiresAt - Date.now() > REFRESH_SKEW_MS;
 
   try {
     const client = await ensureClientRegistered();
@@ -1048,8 +1076,16 @@ async function doRefresh(vaultKey: string): Promise<AuthCredentials | null> {
     });
 
     if (!tokenRes.ok) {
-      clearSession(vaultKey);
-      return null;
+      const errorBody = await tokenRes.text().catch(() => "");
+      if (shouldClearVaultOnRefreshFailure({ stillValid, errorBody })) {
+        clearSession(vaultKey);
+        return null;
+      }
+      // Access token / Qobrix key still usable — keep vault, retry later.
+      process.stderr.write(
+        `[qobrix-crm-mcp] WARNING: token refresh HTTP ${tokenRes.status}; keeping vault (access still valid)\n`
+      );
+      return getSessionCredentials(vaultKey);
     }
 
     const tokens = (await tokenRes.json()) as {
@@ -1079,9 +1115,14 @@ async function doRefresh(vaultKey: string): Promise<AuthCredentials | null> {
       vaultKey
     );
     return getSessionCredentials(vaultKey);
-  } catch {
-    clearSession(vaultKey);
-    return null;
+  } catch (err) {
+    // Network / transient errors must not destroy a still-valid vault.
+    // Authoritative clear happens on Qobrix 401/403 in client.ts.
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `[qobrix-crm-mcp] WARNING: token refresh error (${msg}); keeping vault\n`
+    );
+    return getSessionCredentials(vaultKey);
   }
 }
 
@@ -1113,6 +1154,7 @@ export function __resetOauthClientForTests(): void {
   _pending.clear();
   _pendingByState.clear();
   _refreshLocks.clear();
+  _lastEvictAt = 0;
 }
 
 /** Test helper — write a vault record without going through OAuth. */

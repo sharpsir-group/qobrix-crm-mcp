@@ -93,17 +93,16 @@ export async function startHttpServer(): Promise<void> {
   );
 
   app.get("/health", (_req, res) => {
+    const vaultCount =
+      authMode === "oauth" ? countSessionVaults() : undefined;
     res.json({
       ok: true,
       transport: "http",
       auth: authMode,
       description: modeDescription(authMode),
       connected:
-        authMode === "oauth"
-          ? Boolean(getSessionCredentials())
-          : undefined,
-      session_vaults:
-        authMode === "oauth" ? countSessionVaults() : undefined,
+        authMode === "oauth" ? Boolean(vaultCount && vaultCount > 0) : undefined,
+      session_vaults: vaultCount,
     });
   });
 
@@ -272,7 +271,10 @@ export async function startHttpServer(): Promise<void> {
         process.stderr.write(
           `[qobrix-crm-mcp] Rejected forged/unsigned identity; vault=default audit=${vaultKeyAuditHash(vaultKey)}\n`
         );
-      } else if (req.method === "POST") {
+      } else if (
+        req.method === "POST" &&
+        process.env.QOBRIX_MCP_DEBUG === "1"
+      ) {
         process.stderr.write(
           `[qobrix-crm-mcp] /mcp vault audit=${vaultKeyAuditHash(vaultKey)} reason=${reason}\n`
         );
