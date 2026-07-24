@@ -7,12 +7,30 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ---
 
+## [1.8.1] - 2026-07-24
+
+### Changed
+
+- Mode D public resource URL renamed to
+  `https://intranet.sharpsir.group/qobrix-crm/mcp` (AS issuer
+  `https://intranet.sharpsir.group/qobrix-crm/mcp-oauth`).
+- Callback page footer entity is now G.C.A. Global Citizen Advisory Limited.
+- `docs/INSTALL.md` Apache block uses AS-first `ProxyPass` ordering so
+  `/qobrix-crm/mcp` does not shadow `/qobrix-crm/mcp-oauth`.
+
+### Compatibility
+
+- Modes A, B, and C are unchanged. Mode D remains opt-in; only the public
+  path prefix changed.
+
+---
+
 ## [1.8.0] - 2026-07-24
 
 ### Added
 
 - Production Mode D deployment at
-  `https://intranet.sharpsir.group/qobrix-crm-mcp/mcp`, paired with the
+  `https://intranet.sharpsir.group/qobrix-crm/mcp`, paired with the
   path-prefixed Sharp Matrix OAuth issuer.
 - Path-aware RFC 8414 Authorization Server discovery for issuers mounted below
   the host root.

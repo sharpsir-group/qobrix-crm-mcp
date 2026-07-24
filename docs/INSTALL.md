@@ -2,8 +2,8 @@
 
 This guide deploys the MCP Resource Server in Mode D at:
 
-- MCP: `https://intranet.sharpsir.group/qobrix-crm-mcp/mcp`
-- OAuth issuer: `https://intranet.sharpsir.group/qobrix-crm-mcp-oauth`
+- MCP: `https://intranet.sharpsir.group/qobrix-crm/mcp`
+- OAuth issuer: `https://intranet.sharpsir.group/qobrix-crm/mcp-oauth`
 
 The Node processes bind only to loopback. Apache provides public HTTPS.
 
@@ -43,9 +43,9 @@ QOBRIX_MCP_AUTH=oauth-claude
 QOBRIX_MCP_HOST=127.0.0.1
 QOBRIX_MCP_PORT=3502
 QOBRIX_MCP_ALLOWED_HOSTS=intranet.sharpsir.group
-QOBRIX_MCP_PUBLIC_URL=https://intranet.sharpsir.group/qobrix-crm-mcp
-QOBRIX_MCP_RESOURCE_URL=https://intranet.sharpsir.group/qobrix-crm-mcp/mcp
-QOBRIX_OAUTH_ISSUER=https://intranet.sharpsir.group/qobrix-crm-mcp-oauth
+QOBRIX_MCP_PUBLIC_URL=https://intranet.sharpsir.group/qobrix-crm
+QOBRIX_MCP_RESOURCE_URL=https://intranet.sharpsir.group/qobrix-crm/mcp
+QOBRIX_OAUTH_ISSUER=https://intranet.sharpsir.group/qobrix-crm/mcp-oauth
 QOBRIX_OAUTH_INTROSPECTION_SECRET=<same-value-as-the-oauth-server>
 QOBRIX_MCP_STATE_SECRET=<random-hex-value>
 QOBRIX_MCP_DATA_DIR=./data/mcp-oauth
@@ -81,27 +81,28 @@ curl -fsS http://127.0.0.1:3502/health
 
 ## Apache reverse proxy
 
-Add these directives to the TLS virtual host. Keep the well-known paths before
-the broad OAuth prefix.
+Add these directives to the TLS virtual host. Mount the OAuth AS
+(`/qobrix-crm/mcp-oauth/`) **before** the MCP resource — `/qobrix-crm/mcp`
+is a string prefix of `/qobrix-crm/mcp-oauth`, so AS-first ordering is
+required for first-match-wins `ProxyPass`.
 
 ```apache
-# RFC 9728 protected-resource metadata and MCP Streamable HTTP endpoint.
-ProxyPass /.well-known/oauth-protected-resource/qobrix-crm-mcp/mcp http://127.0.0.1:3502/.well-known/oauth-protected-resource/qobrix-crm-mcp/mcp
-ProxyPassReverse /.well-known/oauth-protected-resource/qobrix-crm-mcp/mcp http://127.0.0.1:3502/.well-known/oauth-protected-resource/qobrix-crm-mcp/mcp
-ProxyPass /qobrix-crm-mcp/mcp http://127.0.0.1:3502/mcp timeout=600 flushpackets=on
-ProxyPassReverse /qobrix-crm-mcp/mcp http://127.0.0.1:3502/mcp
-
-# RFC 8414 path-aware Authorization Server metadata.
-ProxyPass /.well-known/oauth-authorization-server/qobrix-crm-mcp-oauth http://127.0.0.1:3503/.well-known/oauth-authorization-server
-ProxyPassReverse /.well-known/oauth-authorization-server/qobrix-crm-mcp-oauth http://127.0.0.1:3503/.well-known/oauth-authorization-server
+# Qobrix MCP OAuth AS — issuer /qobrix-crm/mcp-oauth (MUST precede /qobrix-crm/mcp)
+ProxyPass /.well-known/oauth-authorization-server/qobrix-crm/mcp-oauth http://127.0.0.1:3503/.well-known/oauth-authorization-server
+ProxyPassReverse /.well-known/oauth-authorization-server/qobrix-crm/mcp-oauth http://127.0.0.1:3503/.well-known/oauth-authorization-server
 ProxyPass /.well-known/oauth-authorization-server http://127.0.0.1:3503/.well-known/oauth-authorization-server
 ProxyPassReverse /.well-known/oauth-authorization-server http://127.0.0.1:3503/.well-known/oauth-authorization-server
+ProxyPass /qobrix-crm/mcp-oauth/ http://127.0.0.1:3503/
+ProxyPassReverse /qobrix-crm/mcp-oauth/ http://127.0.0.1:3503/
 
-# OAuth endpoints; public prefix is stripped before forwarding.
-ProxyPass /qobrix-crm-mcp-oauth/ http://127.0.0.1:3503/
-ProxyPassReverse /qobrix-crm-mcp-oauth/ http://127.0.0.1:3503/
+# Qobrix MCP resource (Mode D). Listed after mcp-oauth so the longer AS
+# prefix wins; /qobrix-crm/mcp is only reached for the MCP path.
+ProxyPass /.well-known/oauth-protected-resource/qobrix-crm/mcp http://127.0.0.1:3502/.well-known/oauth-protected-resource/qobrix-crm/mcp
+ProxyPassReverse /.well-known/oauth-protected-resource/qobrix-crm/mcp http://127.0.0.1:3502/.well-known/oauth-protected-resource/qobrix-crm/mcp
+ProxyPass /qobrix-crm/mcp http://127.0.0.1:3502/mcp timeout=600 flushpackets=on
+ProxyPassReverse /qobrix-crm/mcp http://127.0.0.1:3502/mcp
 
-<Location "/qobrix-crm-mcp/mcp">
+<Location "/qobrix-crm/mcp">
   SetEnv proxy-sendchunked 1
   Header set X-Accel-Buffering "no"
 </Location>
@@ -121,7 +122,7 @@ The unauthenticated MCP request must return `401` with a
 
 ```bash
 curl -si -X POST \
-  https://intranet.sharpsir.group/qobrix-crm-mcp/mcp \
+  https://intranet.sharpsir.group/qobrix-crm/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}'
@@ -131,10 +132,10 @@ Verify the discovery documents:
 
 ```bash
 curl -fsS \
-  https://intranet.sharpsir.group/.well-known/oauth-protected-resource/qobrix-crm-mcp/mcp
+  https://intranet.sharpsir.group/.well-known/oauth-protected-resource/qobrix-crm/mcp
 
 curl -fsS \
-  https://intranet.sharpsir.group/.well-known/oauth-authorization-server/qobrix-crm-mcp-oauth
+  https://intranet.sharpsir.group/.well-known/oauth-authorization-server/qobrix-crm/mcp-oauth
 ```
 
 The PRM `resource` must exactly match the MCP URL. Its first
@@ -144,9 +145,9 @@ The PRM `resource` must exactly match the MCP URL. Its first
 
 1. Open Claude.ai or Claude Desktop.
 2. Go to **Settings → Connectors → Add custom connector**.
-3. Enter `https://intranet.sharpsir.group/qobrix-crm-mcp/mcp`.
+3. Enter `https://intranet.sharpsir.group/qobrix-crm/mcp`.
 4. Select **Connect**.
-5. Complete the Sharp Matrix Qobrix authorization form (CRM URL, username,
+5. Complete the Sharp Matrix Qobrix authorization form (endpoint, username,
    password, and 2FA when requested).
 6. Approve access. Claude receives an audience-bound token and loads the tools.
 

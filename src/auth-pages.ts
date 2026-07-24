@@ -168,7 +168,7 @@ function shellPage(opts: {
           <p class="hint" id="close-hint" hidden>If this window does not close, close it manually and return to the chat.</p>
         </div>
         <div class="footer">
-          <p>© ${YEAR} Sharp Sotheby's International Realty</p>
+          <p>© ${YEAR} G.C.A. Global Citizen Advisory Limited</p>
         </div>
       </div>
     </div>

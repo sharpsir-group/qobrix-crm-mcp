@@ -344,7 +344,7 @@ For **ragchat / Mode C**, register the remote MCP URL (`…/mcp`) as a normal St
 
 Use a **separate** MCP process (or host) with `QOBRIX_MCP_AUTH=oauth-claude`. Claude drives OAuth itself:
 
-1. User adds a custom connector in Claude.ai / Desktop → pastes `https://intranet.sharpsir.group/qobrix-crm-mcp/mcp`
+1. User adds a custom connector in Claude.ai / Desktop → pastes `https://intranet.sharpsir.group/qobrix-crm/mcp`
 2. Claude hits `/mcp` → receives `401` + `WWW-Authenticate: Bearer resource_metadata=…`
 3. Claude fetches `/.well-known/oauth-protected-resource` → discovers `QOBRIX_OAUTH_ISSUER`
 4. Claude completes DCR + PKCE against the Enterprise OAuth AS (redirect `https://claude.ai/api/mcp/auth_callback`)
@@ -356,9 +356,9 @@ export QOBRIX_MCP_AUTH=oauth-claude
 export QOBRIX_MCP_HOST=127.0.0.1
 export QOBRIX_MCP_PORT=3502
 export QOBRIX_MCP_ALLOWED_HOSTS=intranet.sharpsir.group
-export QOBRIX_MCP_PUBLIC_URL=https://intranet.sharpsir.group/qobrix-crm-mcp
-export QOBRIX_MCP_RESOURCE_URL=https://intranet.sharpsir.group/qobrix-crm-mcp/mcp
-export QOBRIX_OAUTH_ISSUER=https://intranet.sharpsir.group/qobrix-crm-mcp-oauth
+export QOBRIX_MCP_PUBLIC_URL=https://intranet.sharpsir.group/qobrix-crm
+export QOBRIX_MCP_RESOURCE_URL=https://intranet.sharpsir.group/qobrix-crm/mcp
+export QOBRIX_OAUTH_ISSUER=https://intranet.sharpsir.group/qobrix-crm/mcp-oauth
 export QOBRIX_OAUTH_INTROSPECTION_SECRET=<shared-secret-from-bundle>
 npm start
 ```
