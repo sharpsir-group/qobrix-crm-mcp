@@ -2,7 +2,7 @@
 
 Connect Claude, Cursor, ChatGPT, PeerPane / ragchat, or any MCP client to live Qobrix CRM data.
 
-**Package version:** see [`package.json`](../package.json) (currently **1.7.1**).
+**Package version:** see [`package.json`](../package.json) (currently **1.8.0**).
 **Tools:** **64** MCP tools (entities, analytics, reporting, audit, cache, session/identity). Full list: [README — Tools at a Glance](../README.md#tools-at-a-glance).  
 **Changelog:** [`CHANGELOG.md`](../CHANGELOG.md).
 
@@ -187,8 +187,8 @@ Deliver the Sign In link **only to that individual** (never into a group thread)
 2. MCP returns either:
    - **URL-mode elicitation** (`JSON-RPC -32042`) when the client supports `elicitation.url`, or
    - A Markdown **`[Sign In to Qobrix]({PUBLIC_URL}/connect?e=…)`** link (ragchat / LangChain fallback). The LLM must show that exact link (unique / single-use — never reuse a link from an earlier message).
-3. User opens `{PUBLIC_URL}/connect?e=…` → signed cookie → redirect to the AS login (HumaticAI-styled form: CRM URL, username, password, optional 2FA, collapsible legal clickwrap).
-4. AS redirects to `{PUBLIC_URL}/oauth/callback` → PKCE exchange + introspection → encrypted session vault (`session.enc`). The browser shows a **Connected** (or error) page in the same HumaticAI card shell as the login form, with a **Close** button — close the window and return to the chat to continue.
+3. User opens `{PUBLIC_URL}/connect?e=…` → signed cookie → redirect to the AS login (Sharp Matrix–styled form: CRM URL, username, password, optional 2FA, collapsible legal clickwrap).
+4. AS redirects to `{PUBLIC_URL}/oauth/callback` → PKCE exchange + introspection → encrypted session vault (`session.enc`). The browser shows a **Connected** (or error) page in the same Sharp Matrix card shell as the login form, with a **Close** button — close the window and return to the chat to continue.
 5. User retries — tools run with that user’s minted Qobrix API key.
 6. **`qobrix_whoami`** returns the current profile (`user` + `capabilities` + `portals`, plus OAuth `subject` when available).
 7. **`qobrix_sign_out`** fully revokes: AS `/disconnect` (Bearer) deletes the minted Qobrix API key and clears the AS vault/tokens, then the local vault is wiped. Mode C uses one shared vault — sign-out disconnects the shared identity for this MCP process.
@@ -213,7 +213,7 @@ Deliver the Sign In link **only to that individual** (never into a group thread)
 - **Cookies:** connect cookie `Path` follows `QOBRIX_MCP_PUBLIC_URL` pathname (avoids reverse-proxy `ProxyPassReverseCookiePath` rewrites stealing `Path=/`).
 - **Proxies:** Express `trust proxy` is **2** (Cloudflare → Apache → Node) so rate-limit IP keying is correct.
 - Prefer **subdomain** URLs for the AS. Path mounts work when the AS issuer includes the path, login POST is relative, and well-known discovery is proxied carefully (see AS User Guide).
-- Reference production (HumaticAI): public OAuth routes under `https://humaticai.com/qobrix-mcp` + `https://humaticai.com/qobrix-oauth`; `/mcp` stays on localhost for Alex/ragchat.
+- Reference production (Sharp Matrix intranet): public Mode D MCP at `https://intranet.sharpsir.group/qobrix-crm-mcp/mcp` with AS at `https://intranet.sharpsir.group/qobrix-crm-mcp-oauth`. See [INSTALL.md](./INSTALL.md).
 
 ### 5. Verify
 
@@ -245,12 +245,12 @@ Mode D is **additive**. It does not change Mode A/B/C behavior. Claude requires 
 ```bash
 export QOBRIX_MCP_TRANSPORT=http
 export QOBRIX_MCP_AUTH=oauth-claude          # or claude / d
-export QOBRIX_MCP_HOST=0.0.0.0
+export QOBRIX_MCP_HOST=127.0.0.1
 export QOBRIX_MCP_PORT=3502
-export QOBRIX_MCP_ALLOWED_HOSTS=qobrix-mcp.example.com
-export QOBRIX_MCP_PUBLIC_URL=https://qobrix-mcp.example.com
-export QOBRIX_MCP_RESOURCE_URL=https://qobrix-mcp.example.com/mcp
-export QOBRIX_OAUTH_ISSUER=https://qobrix-oauth.example.com
+export QOBRIX_MCP_ALLOWED_HOSTS=intranet.sharpsir.group
+export QOBRIX_MCP_PUBLIC_URL=https://intranet.sharpsir.group/qobrix-crm-mcp
+export QOBRIX_MCP_RESOURCE_URL=https://intranet.sharpsir.group/qobrix-crm-mcp/mcp
+export QOBRIX_OAUTH_ISSUER=https://intranet.sharpsir.group/qobrix-crm-mcp-oauth
 export QOBRIX_OAUTH_INTROSPECTION_SECRET=<same-secret-as-Mode-C-AS>
 npm start
 ```
@@ -260,7 +260,7 @@ Pair with the same Enterprise OAuth AS used for Mode C (`QOBRIX_MCP_RESOURCE_URL
 ### 2. AS redirect allowlist (when enabled)
 
 ```bash
-export QOBRIX_OAUTH_REDIRECT_ALLOWLIST=https://claude.ai/api/mcp/auth_callback,http://127.0.0.1,http://localhost
+export QOBRIX_OAUTH_REDIRECT_ALLOWLIST=https://claude.ai/api/mcp/auth_callback,http://127.0.0.1,http://localhost,cursor://
 ```
 
 Empty allowlist = allow all (default; Mode C local pairings keep working).
@@ -273,28 +273,35 @@ Empty allowlist = allow all (default; Mode C local pairings keep working).
 | `GET /.well-known/oauth-protected-resource` | RFC 9728 PRM → AS issuer | **Yes** |
 | `GET /health` | Liveness | Prefer private |
 
-**Use a subdomain** for the Mode D MCP (e.g. `https://qobrix-mcp.example.com/mcp`). Path-prefix mounts (`https://host/prefix/mcp`) are **not supported for Mode D** in this release — reverse-proxy prefix stripping often breaks RFC 9728 well-known discovery. Mode C path mounts remain fine for `/connect` + `/oauth/callback`.
+**Path-prefix mounts are supported** when Apache proxies host-root well-known discovery correctly (RFC 9728 / RFC 8414 path-aware URLs). Sharp Matrix production:
 
-Allowlist Anthropic egress `160.79.104.0/21` if the MCP/AS sit behind a WAF. See [Claude connector authentication](https://claude.com/docs/connectors/building/authentication).
+| Public URL | Role |
+|------------|------|
+| `https://intranet.sharpsir.group/qobrix-crm-mcp/mcp` | Mode D MCP resource |
+| `https://intranet.sharpsir.group/qobrix-crm-mcp-oauth` | Paired OAuth AS issuer |
+| `https://intranet.sharpsir.group/.well-known/oauth-protected-resource/qobrix-crm-mcp/mcp` | PRM |
+| `https://intranet.sharpsir.group/.well-known/oauth-authorization-server/qobrix-crm-mcp-oauth` | AS metadata |
+
+See [INSTALL.md](./INSTALL.md) for the exact Apache `ProxyPass` block. Subdomain deploys also work. Allowlist Anthropic egress `160.79.104.0/21` if the MCP/AS sit behind a WAF. See [Claude connector authentication](https://claude.com/docs/connectors/building/authentication).
 
 ### 4. Connect in Claude
 
 1. Claude.ai or Claude Desktop → **Settings → Connectors → Add custom connector**
-2. Paste `https://qobrix-mcp.example.com/mcp`
-3. Click **Connect** → complete Qobrix login + 2FA + consent on the Enterprise OAuth AS
+2. Paste `https://intranet.sharpsir.group/qobrix-crm-mcp/mcp`
+3. Click **Connect** → complete Qobrix login + 2FA + consent on the Sharp Matrix OAuth AS
 4. Tools appear under the connector; Claude refreshes tokens on `401`
 
 ### 5. Verify
 
 ```bash
 # Unauthenticated → 401 + WWW-Authenticate resource_metadata
-curl -si -X POST https://qobrix-mcp.example.com/mcp \
+curl -si -X POST https://intranet.sharpsir.group/qobrix-crm-mcp/mcp \
   -H 'Content-Type: application/json' -H 'Accept: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' \
   | head -20
 
 # PRM document
-curl -s https://qobrix-mcp.example.com/.well-known/oauth-protected-resource | jq .
+curl -s https://intranet.sharpsir.group/.well-known/oauth-protected-resource/qobrix-crm-mcp/mcp | jq .
 ```
 
 Mode C’s guidance above (**deny public `/mcp`** for ragchat) remains correct for Mode C processes — do not apply Mode D’s public `/mcp` topology to a Mode C instance.

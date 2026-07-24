@@ -35,6 +35,7 @@
 
 ## Table of contents
 
+- [**Installation Guide**](docs/INSTALL.md) — Sharp Matrix intranet, pm2, Apache, and Claude connector setup
 - [**User Guide**](docs/USER_GUIDE.md) — Mode A → Mode B → Mode C → Mode D (Claude.ai) step-by-step
 - [What it does](#what-it-does)
 - [Who it is for](#who-it-is-for)
@@ -343,7 +344,7 @@ For **ragchat / Mode C**, register the remote MCP URL (`…/mcp`) as a normal St
 
 Use a **separate** MCP process (or host) with `QOBRIX_MCP_AUTH=oauth-claude`. Claude drives OAuth itself:
 
-1. User adds a custom connector in Claude.ai / Desktop → pastes `https://qobrix-mcp.example.com/mcp`
+1. User adds a custom connector in Claude.ai / Desktop → pastes `https://intranet.sharpsir.group/qobrix-crm-mcp/mcp`
 2. Claude hits `/mcp` → receives `401` + `WWW-Authenticate: Bearer resource_metadata=…`
 3. Claude fetches `/.well-known/oauth-protected-resource` → discovers `QOBRIX_OAUTH_ISSUER`
 4. Claude completes DCR + PKCE against the Enterprise OAuth AS (redirect `https://claude.ai/api/mcp/auth_callback`)
@@ -352,12 +353,12 @@ Use a **separate** MCP process (or host) with `QOBRIX_MCP_AUTH=oauth-claude`. Cl
 ```bash
 export QOBRIX_MCP_TRANSPORT=http
 export QOBRIX_MCP_AUTH=oauth-claude
-export QOBRIX_MCP_HOST=0.0.0.0
+export QOBRIX_MCP_HOST=127.0.0.1
 export QOBRIX_MCP_PORT=3502
-export QOBRIX_MCP_ALLOWED_HOSTS=qobrix-mcp.example.com
-export QOBRIX_MCP_PUBLIC_URL=https://qobrix-mcp.example.com
-export QOBRIX_MCP_RESOURCE_URL=https://qobrix-mcp.example.com/mcp
-export QOBRIX_OAUTH_ISSUER=https://qobrix-oauth.example.com
+export QOBRIX_MCP_ALLOWED_HOSTS=intranet.sharpsir.group
+export QOBRIX_MCP_PUBLIC_URL=https://intranet.sharpsir.group/qobrix-crm-mcp
+export QOBRIX_MCP_RESOURCE_URL=https://intranet.sharpsir.group/qobrix-crm-mcp/mcp
+export QOBRIX_OAUTH_ISSUER=https://intranet.sharpsir.group/qobrix-crm-mcp-oauth
 export QOBRIX_OAUTH_INTROSPECTION_SECRET=<shared-secret-from-bundle>
 npm start
 ```
@@ -365,7 +366,7 @@ npm start
 On the AS, when using a redirect allowlist, include Claude’s hosted callback:
 
 ```bash
-export QOBRIX_OAUTH_REDIRECT_ALLOWLIST=https://claude.ai/api/mcp/auth_callback,http://127.0.0.1,http://localhost
+export QOBRIX_OAUTH_REDIRECT_ALLOWLIST=https://claude.ai/api/mcp/auth_callback,http://127.0.0.1,http://localhost,cursor://
 ```
 
 Publish **HTTPS `/mcp` + PRM** (and the AS) to the public internet; allowlist Anthropic egress `160.79.104.0/21` if WAF’d. Mode C’s loopback/`deny public /mcp` guidance stays valid for ragchat deployments — do not flip that topology for Mode C processes.

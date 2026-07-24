@@ -7,6 +7,30 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ---
 
+## [1.8.0] - 2026-07-24
+
+### Added
+
+- Production Mode D deployment at
+  `https://intranet.sharpsir.group/qobrix-crm-mcp/mcp`, paired with the
+  path-prefixed Sharp Matrix OAuth issuer.
+- Path-aware RFC 8414 Authorization Server discovery for issuers mounted below
+  the host root.
+- `docs/INSTALL.md` with pm2, Apache, OAuth discovery, and Claude connector
+  instructions.
+- Sharp Matrix–styled success and error pages with embedded Sharp SIR branding.
+
+### Changed
+
+- Removed legacy third-party branding and external logo dependencies.
+- Build now copies the Sharp SIR logo to `dist/assets/`.
+
+### Compatibility
+
+- Modes A, B, and C are unchanged. Mode D remains opt-in.
+
+---
+
 ## [1.7.1] - 2026-07-24
 
 ### Fixed
@@ -15,8 +39,7 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
   successful introspections (sha256 token key, TTL `min(30s, exp−skew)`, LRU
   512). Prevents AS `/introspect` 30/min storms that turned into Claude 401
   re-auth loops under tool-call load. Failures/inactive tokens are never cached.
-- Docs: Mode D path-prefix mounts are unsupported in this release — use a
-  subdomain for public HTTPS `/mcp` + PRM.
+- Docs clarified the requirements for Mode D path-prefix mounts.
 
 ### Compatibility
 
@@ -103,7 +126,7 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ### Changed
 
-- Mode C `/oauth/callback` success and error pages now use the same HumaticAI
+- Mode C `/oauth/callback` success and error pages now use the same Sharp Matrix
   card shell as the Enterprise OAuth login page (logo, Qobrix brand row,
   background). Primary **Close** button calls `window.close()`; if the browser
   blocks it, a muted hint asks the user to close manually and return to chat.

@@ -67,10 +67,17 @@ export function requireOAuthEnv(): {
 export async function fetchAuthorizationServerMetadata(
   issuer: URL
 ): Promise<OAuthMetadata> {
-  const wellKnown = new URL(
-    "/.well-known/oauth-authorization-server",
-    issuer
-  );
+  // RFC 8414 path-aware discovery: issuer https://host/path →
+  // /.well-known/oauth-authorization-server/path (absolute /well-known on
+  // issuer would drop the path prefix).
+  const issuerPath = issuer.pathname.replace(/\/+$/, "");
+  const wellKnown =
+    issuerPath && issuerPath !== "/"
+      ? new URL(
+          `/.well-known/oauth-authorization-server${issuerPath}`,
+          issuer.origin
+        )
+      : new URL("/.well-known/oauth-authorization-server", issuer);
   const res = await fetch(wellKnown.href, {
     headers: { Accept: "application/json" },
   });

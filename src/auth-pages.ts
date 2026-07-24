@@ -1,98 +1,116 @@
 /**
  * Mode C browser pages after /oauth/callback.
- * Visual shell mirrors qobrix-crm-mcp-oauth login-page.ts (duplicated CSS —
+ * Visual shell matches qobrix-crm-mcp-oauth Sharp Matrix login (duplicated CSS —
  * no cross-repo import).
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const YEAR = new Date().getFullYear();
+
+function sharpLogoImgHtml(): string {
+  try {
+    const svg = readFileSync(
+      join(__dirname, "assets", "sharp-sir-logo.svg"),
+      "utf8"
+    ).replace(/fill="white"/g, 'fill="#0f172a"');
+    const b64 = Buffer.from(svg).toString("base64");
+    return `<img class="logo" src="data:image/svg+xml;base64,${b64}" alt="Sharp Sotheby's International Realty" />`;
+  } catch {
+    return `<div class="logo-fallback" aria-hidden="true">Sharp SIR</div>`;
+  }
+}
+
 const SHELL_CSS = `
     :root {
-      --bg: #f8fafc;
-      --overlay: rgba(0,0,0,.45);
-      --card: #ffffff;
-      --fg: #0f172a;
-      --muted: #64748b;
-      --border: #e2e8f0;
-      --ring: #6366f1;
-      --err: #dc2626;
-      --err-bg: #fef2f2;
-      --err-border: #fecaca;
+      --background: hsl(220 20% 98%);
+      --foreground: hsl(222 47% 11%);
+      --card: hsl(0 0% 100%);
+      --card-foreground: hsl(222 47% 11%);
+      --primary: hsl(222 47% 11%);
+      --primary-foreground: hsl(0 0% 100%);
+      --muted: hsl(220 15% 95%);
+      --muted-foreground: hsl(220 10% 45%);
+      --accent: hsl(43 74% 49%);
+      --border: hsl(220 15% 90%);
       --ok: #0a7a3e;
       --ok-bg: #f0fdf4;
       --ok-border: #bbf7d0;
+      --err: hsl(0 70% 35%);
+      --err-bg: hsl(0 86% 97%);
+      --err-border: hsl(0 74% 85%);
+      --radius: 0.375rem;
     }
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 1.5rem;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-      color: var(--fg);
-      background:
-        linear-gradient(var(--overlay), var(--overlay)),
-        radial-gradient(1200px 600px at 50% -10%, #c7d2fe 0%, transparent 55%),
-        var(--bg);
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--background);
+      color: var(--foreground);
+      font-family: "Nunito Sans", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page {
+      min-height: 100vh; min-height: 100dvh;
+      position: relative; overflow: hidden;
+      background: var(--background);
+    }
+    .center {
+      height: 100dvh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0 1rem;
     }
     .card {
-      width: 100%;
-      max-width: 420px;
-      background: var(--card);
+      width: 100%; max-width: 28rem;
+      position: relative; z-index: 10;
+      background: var(--card); color: var(--card-foreground);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 2rem;
-      box-shadow: 0 20px 40px rgba(15, 23, 42, 0.12);
+      border-radius: var(--radius);
+      box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
     }
-    .header { text-align: center; margin-bottom: 1.5rem; }
-    .logo { display: block; width: 40px; height: 40px; margin: 0 auto 1rem; object-fit: contain; }
-    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 0.35rem; }
-    .subtitle { margin: 0; color: var(--muted); font-size: 0.925rem; line-height: 1.45; }
-    .client-brand {
-      display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
-      margin-top: 0.65rem; font-size: 0.95rem; font-weight: 600; color: var(--fg);
+    .header { text-align: center; padding: 1.5rem 1.5rem 0.75rem; }
+    .brand { display: flex; flex-direction: column; align-items: center; margin-bottom: 1rem; }
+    .logo { height: 2.75rem; width: auto; display: block; }
+    .logo-fallback {
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: 1.25rem; font-weight: 600;
     }
-    .client-brand img {
-      width: 28px; height: 28px; border-radius: 6px; object-fit: contain;
-      background: #fff; border: 1px solid var(--border);
+    .divider { width: 4rem; height: 1px; background: var(--accent); margin: 0.75rem auto 0; }
+    h1 {
+      margin: 0;
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-weight: 400; font-size: 1.25rem; letter-spacing: 0.02em;
     }
-    .body { display: flex; flex-direction: column; gap: 1rem; }
+    .subtitle {
+      margin: 0.35rem 0 0; font-weight: 300; font-size: 0.875rem;
+      color: var(--muted-foreground);
+    }
+    .body { padding: 0 1.5rem 1rem; display: flex; flex-direction: column; gap: 1rem; }
     .alert {
       display: flex; gap: 0.5rem; align-items: flex-start;
-      padding: 0.75rem; border-radius: 0.5rem;
+      padding: 0.75rem; border-radius: var(--radius);
       font-size: 0.875rem; line-height: 1.35;
     }
     .alert .icon { width: 1rem; height: 1rem; flex-shrink: 0; margin-top: 0.1rem; }
-    .alert-ok {
-      background: var(--ok-bg); border: 1px solid var(--ok-border); color: var(--ok);
-    }
-    .alert-err {
-      background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err);
-    }
-    .hint { margin: 0; color: var(--muted); font-size: 0.8rem; line-height: 1.45; text-align: center; }
+    .alert-ok { background: var(--ok-bg); border: 1px solid var(--ok-border); color: var(--ok); }
+    .alert-err { background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err); }
+    .hint { margin: 0; color: var(--muted-foreground); font-size: 0.8rem; line-height: 1.45; text-align: center; }
     .btn {
-      width: 100%; height: 2.75rem; border-radius: 0.5rem; border: 0;
+      width: 100%; height: 2.5rem; border-radius: var(--radius); border: 0;
       font-size: 0.95rem; font-weight: 600; cursor: pointer;
-      display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-family: inherit;
+      color: var(--primary-foreground); background: var(--primary);
     }
-    .btn-primary {
-      color: #fff;
-      background: linear-gradient(90deg, #4f46e5, #9333ea);
-      box-shadow: 0 10px 20px rgba(99, 102, 241, 0.25);
+    .btn:hover { background: hsl(222 47% 16%); }
+    .footer {
+      border-top: 1px solid var(--border);
+      padding: 0.85rem 1.5rem 1.25rem;
+      text-align: center;
     }
-    .btn-primary:hover { background: linear-gradient(90deg, #4338ca, #7e22ce); }
-`;
-
-const HEADER = `
-    <div class="header">
-      <img class="logo" src="https://humaticai.com/logo.png" alt="HumaticAI" width="40" height="40" />
-      <h1>__TITLE__</h1>
-      <p class="subtitle">__SUBTITLE__</p>
-      <div class="client-brand">
-        <img src="https://framerusercontent.com/images/WxaZNtyO1nDu7UmyK648dCQqg.png?scale-down-to=512&amp;width=1000&amp;height=1000" alt="" width="28" height="28" />
-        <span>Qobrix Real Estate CRM</span>
-      </div>
-    </div>
+    .footer p { margin: 0; font-size: 0.7rem; color: var(--muted-foreground); }
 `;
 
 const CLOSE_SCRIPT = `
@@ -121,27 +139,40 @@ function shellPage(opts: {
   subtitle: string;
   bodyHtml: string;
 }): string {
-  const header = HEADER.replace("__TITLE__", escapeHtml(opts.h1)).replace(
-    "__SUBTITLE__",
-    escapeHtml(opts.subtitle)
-  );
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(opts.title)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Nunito+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>${SHELL_CSS}</style>
 </head>
 <body>
-  <main class="card">
-    ${header}
-    <div class="body">
-      ${opts.bodyHtml}
-      <button type="button" class="btn btn-primary" id="close-btn">Close</button>
-      <p class="hint" id="close-hint" hidden>If this window does not close, close it manually and return to the chat.</p>
+  <div class="page">
+    <div class="center">
+      <div class="card">
+        <div class="header">
+          <div class="brand">
+            ${sharpLogoImgHtml()}
+            <div class="divider"></div>
+          </div>
+          <h1>${escapeHtml(opts.h1)}</h1>
+          <p class="subtitle">${escapeHtml(opts.subtitle)}</p>
+        </div>
+        <div class="body">
+          ${opts.bodyHtml}
+          <button type="button" class="btn" id="close-btn">Close</button>
+          <p class="hint" id="close-hint" hidden>If this window does not close, close it manually and return to the chat.</p>
+        </div>
+        <div class="footer">
+          <p>© ${YEAR} Sharp Sotheby's International Realty</p>
+        </div>
+      </div>
     </div>
-  </main>
+  </div>
   ${CLOSE_SCRIPT}
 </body>
 </html>`;
@@ -154,9 +185,9 @@ export function successHtml(subject?: string): string {
       ? `<p class="hint">Session subject ${escapeHtml(subject.slice(0, 12))}…</p>`
       : "";
   return shellPage({
-    title: "Connected — HumaticAI",
-    h1: "Connected",
-    subtitle: "Authorization completed",
+    title: "Connected — Sharp Matrix",
+    h1: "Sharp Matrix",
+    subtitle: "Connected — authorization completed",
     bodyHtml: `
       <div class="alert alert-ok" role="status">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -171,9 +202,9 @@ export function successHtml(subject?: string): string {
 /** Failed Mode C callback or /connect error. */
 export function errorHtml(message: string): string {
   return shellPage({
-    title: "Authorization failed — HumaticAI",
-    h1: "Authorization failed",
-    subtitle: "Something went wrong while connecting to Qobrix",
+    title: "Authorization failed — Sharp Matrix",
+    h1: "Sharp Matrix",
+    subtitle: "Authorization failed",
     bodyHtml: `
       <div class="alert alert-err" role="alert">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
