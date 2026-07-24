@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Connect Claude, Cursor, and other MCP clients to your Qobrix real-estate CRM</strong> — listings, leads, viewings, offers, contracts, and activity in one read-only <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> layer.<br />
-  <strong>64 tools</strong> (CRM entities + AI relevance search + analytics + audit + cache controls + session/identity), <a href="https://www.reso.org/data-dictionary/">RESO Data Dictionary 2.0</a> workflows, optional <strong>Redis-backed response caching</strong>, <strong>three auth modes</strong> (stdio / headers / OAuth 2.1), and <strong>226 automated tests</strong>.
+  <strong>64 tools</strong> (CRM entities + AI relevance search + analytics + audit + cache controls + session/identity), <a href="https://www.reso.org/data-dictionary/">RESO Data Dictionary 2.0</a> workflows, optional <strong>Redis-backed response caching</strong>, <strong>four auth modes</strong> (stdio / headers / OAuth elicitation / Claude remote connector), and <strong>226+ automated tests</strong>.
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@
 
 ## Table of contents
 
-- [**User Guide**](docs/USER_GUIDE.md) — Mode A → Mode B → Mode C step-by-step
+- [**User Guide**](docs/USER_GUIDE.md) — Mode A → Mode B → Mode C → Mode D (Claude.ai) step-by-step
 - [What it does](#what-it-does)
 - [Who it is for](#who-it-is-for)
 - [Canonical real-estate workflows](#canonical-re-workflows)
@@ -273,8 +273,9 @@ Clone this package, run Mode A or B, and put live Qobrix data in front of Claude
 | **A** (default) | Yes | `QOBRIX_MCP_TRANSPORT=stdio` (or unset) | Shared `QOBRIX_API_*` from process env |
 | **B** | Yes | `TRANSPORT=http` + `QOBRIX_MCP_AUTH=headers` | Per-request `X-Api-User` / `X-Api-Key` (trusted callers; bind localhost) |
 | **C** | Needs companion AS | `TRANSPORT=http` + `QOBRIX_MCP_AUTH=oauth` | Self-service OAuth: MCP returns a `/connect` URL; user signs in at SharpSir’s **Enterprise OAuth** Authorization Server; this server holds the session |
+| **D** (opt-in) | Needs companion AS | `TRANSPORT=http` + `QOBRIX_MCP_AUTH=oauth-claude` | Claude.ai / Desktop **remote custom connector**: RFC 9728 PRM + Bearer on `/mcp` (client-driven OAuth) |
 
-Modes A and B are fully supported out of this package. Mode C is for per-user authenticated CRM access (no northbound client OAuth wiring) and requires SharpSir’s separate Enterprise OAuth / SSO product — not distributed as part of this repo.
+Modes A and B are fully supported out of this package. Modes C and D require SharpSir’s separate Enterprise OAuth / SSO product — not distributed as part of this repo. **Mode D does not change Modes A/B/C** — select it only when you want Claude.ai Connectors OAuth.
 
 ### Enterprise OAuth
 
@@ -336,7 +337,38 @@ Mode C endpoints (after the Enterprise OAuth solution is paired):
 
 See **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for Mode A → B → C step-by-step, reverse-proxy lockdown, and Host allowlist details.
 
-Register the remote MCP URL (`…/mcp`) in Claude / Cursor / ChatGPT / ragchat as a normal Streamable HTTP server (**no client-side OAuth provider required**). The MCP handles auth itself.
+For **ragchat / Mode C**, register the remote MCP URL (`…/mcp`) as a normal Streamable HTTP server (**no client-side OAuth provider required**); the MCP handles auth via `/connect`. Keep `/mcp` on localhost in that topology.
+
+#### Mode D — Claude.ai / Desktop custom connector
+
+Use a **separate** MCP process (or host) with `QOBRIX_MCP_AUTH=oauth-claude`. Claude drives OAuth itself:
+
+1. User adds a custom connector in Claude.ai / Desktop → pastes `https://qobrix-mcp.example.com/mcp`
+2. Claude hits `/mcp` → receives `401` + `WWW-Authenticate: Bearer resource_metadata=…`
+3. Claude fetches `/.well-known/oauth-protected-resource` → discovers `QOBRIX_OAUTH_ISSUER`
+4. Claude completes DCR + PKCE against the Enterprise OAuth AS (redirect `https://claude.ai/api/mcp/auth_callback`)
+5. Subsequent `/mcp` calls send `Authorization: Bearer <access_token>`; this server introspects and runs tools as that Qobrix user
+
+```bash
+export QOBRIX_MCP_TRANSPORT=http
+export QOBRIX_MCP_AUTH=oauth-claude
+export QOBRIX_MCP_HOST=0.0.0.0
+export QOBRIX_MCP_PORT=3502
+export QOBRIX_MCP_ALLOWED_HOSTS=qobrix-mcp.example.com
+export QOBRIX_MCP_PUBLIC_URL=https://qobrix-mcp.example.com
+export QOBRIX_MCP_RESOURCE_URL=https://qobrix-mcp.example.com/mcp
+export QOBRIX_OAUTH_ISSUER=https://qobrix-oauth.example.com
+export QOBRIX_OAUTH_INTROSPECTION_SECRET=<shared-secret-from-bundle>
+npm start
+```
+
+On the AS, when using a redirect allowlist, include Claude’s hosted callback:
+
+```bash
+export QOBRIX_OAUTH_REDIRECT_ALLOWLIST=https://claude.ai/api/mcp/auth_callback,http://127.0.0.1,http://localhost
+```
+
+Publish **HTTPS `/mcp` + PRM** (and the AS) to the public internet; allowlist Anthropic egress `160.79.104.0/21` if WAF’d. Mode C’s loopback/`deny public /mcp` guidance stays valid for ragchat deployments — do not flip that topology for Mode C processes.
 
 ### Caching
 
@@ -664,7 +696,7 @@ npm run test:all
 | Relevance | 23 | Boost eval/score/rank (incl. opportunity/contact shapes), fields[]+boost union, DSL help text, search cache-key stability (no live API) |
 | Format | 7 | `formatResult` output cap, paginated truncation, expand/media compaction (`kept_rows>=1`), `result_too_large` refine guard, fallback trailer, env override (no live API) |
 | Client sort | 7 | `normalizeSort` + `buildQobrixUrl` emit OpenAPI `sort[]=` (not scalar `sort=` that Qobrix ignores) |
-| OAuth modes | 3 | Mode B without headers, Mode C `/mcp` without bearer, elicitation `/connect` URL |
+| OAuth modes | 4 | Mode B headers, Mode C `/connect`, Mode D PRM/401/Bearer |
 
 ---
 
@@ -674,7 +706,7 @@ npm run test:all
 src/
 ├── index.ts          # MCP server entry point + RESO workflow instructions
 ├── http.ts           # Streamable HTTP transport (Modes B / C)
-├── modes.ts          # Auth mode resolution (env / headers / oauth)
+├── modes.ts          # Auth mode resolution (env / headers / oauth / oauth-claude)
 ├── client.ts         # QobrixClient — HTTP + read-through response cache
 ├── auth-context.ts   # AsyncLocalStorage per-request credentials
 ├── oauth-client.ts   # Mode C self-service OAuth client + session vault

@@ -7,6 +7,11 @@
  *     The MCP obtains Qobrix credentials via third-party authorization
  *     (URL-mode elicitation / tool-result URL + /connect → AS login).
  *     Northbound MCP clients need no bearer token.
+ * D — HTTP + Claude.ai / Desktop remote-connector OAuth Resource Server
+ *     (opt-in). Northbound clients (Claude) discover the AS via RFC 9728 PRM,
+ *     complete DCR + PKCE, and send Authorization: Bearer on every /mcp call.
+ *     Unauthenticated /mcp returns 401 + WWW-Authenticate. Modes A/B/C are
+ *     unchanged; select Mode D only with QOBRIX_MCP_AUTH=oauth-claude.
  *
  * Trust boundaries:
  * - A: process owner controls env secrets; one shared Qobrix identity.
@@ -17,9 +22,11 @@
  *   per-user session vaults keyed by chat identity (X-Chat-* headers). Pin /mcp
  *   to loopback / trusted net and set QOBRIX_MCP_IDENTITY_SECRET so identity
  *   headers cannot be forged. No third-party authorization servers.
+ * - D: MCP is the OAuth Resource Server for Claude custom connectors. Publish
+ *   HTTPS /mcp + PRM publicly; pair with the same Enterprise OAuth AS as Mode C.
  */
 
-export type AuthMode = "env" | "headers" | "oauth";
+export type AuthMode = "env" | "headers" | "oauth" | "oauth-claude";
 
 export type TransportMode = "stdio" | "http";
 
@@ -33,11 +40,17 @@ export function resolveTransport(): TransportMode {
 
 /**
  * Resolve the HTTP auth mode. Stdio always uses env credentials (Mode A).
- * HTTP defaults to headers (Mode B) unless QOBRIX_MCP_AUTH=oauth (Mode C).
+ * HTTP defaults to headers (Mode B) unless QOBRIX_MCP_AUTH selects oauth (C)
+ * or oauth-claude (D). Existing env/headers/oauth mappings are unchanged.
  */
 export function resolveAuthMode(transport: TransportMode = resolveTransport()): AuthMode {
   if (transport === "stdio") return "env";
   const raw = (process.env.QOBRIX_MCP_AUTH || "headers").toLowerCase().trim();
+  // Mode D selectors — checked before Mode C so "oauth-claude" is not
+  // mis-parsed as starting with "oauth".
+  if (raw === "oauth-claude" || raw === "claude" || raw === "d") {
+    return "oauth-claude";
+  }
   if (raw === "oauth" || raw === "oauth2" || raw === "c") return "oauth";
   if (raw === "env" || raw === "a") return "env";
   return "headers";
@@ -51,5 +64,7 @@ export function modeDescription(mode: AuthMode): string {
       return "Mode B: per-request X-Api-User / X-Api-Key (trusted callers)";
     case "oauth":
       return "Mode C: self-service OAuth client + per-user vaults (paired with qobrix-crm-mcp-oauth)";
+    case "oauth-claude":
+      return "Mode D: Claude.ai / Desktop remote connector (RFC 9728 PRM + Bearer on /mcp)";
   }
 }

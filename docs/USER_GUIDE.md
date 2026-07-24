@@ -2,7 +2,7 @@
 
 Connect Claude, Cursor, ChatGPT, PeerPane / ragchat, or any MCP client to live Qobrix CRM data.
 
-**Package version:** see [`package.json`](../package.json) (currently **1.5.3**).  
+**Package version:** see [`package.json`](../package.json) (currently **1.7.1**).
 **Tools:** **64** MCP tools (entities, analytics, reporting, audit, cache, session/identity). Full list: [README — Tools at a Glance](../README.md#tools-at-a-glance).  
 **Changelog:** [`CHANGELOG.md`](../CHANGELOG.md).
 
@@ -10,9 +10,10 @@ Connect Claude, Cursor, ChatGPT, PeerPane / ragchat, or any MCP client to live Q
 |------|-----------|-------------|----------|
 | **A** (default) | stdio | Shared `QOBRIX_API_*` env | Local IDE, one shared CRM identity |
 | **B** | HTTP | Per-request `X-Api-User` / `X-Api-Key` | Trusted private callers (localhost ragchat, internal services) |
-| **C** (needs Enterprise OAuth AS) | HTTP | Self-service OAuth (`/connect` → login) | Signed-in CRM user (**one shared vault per MCP process** — not multi-tenant isolation) |
+| **C** (needs Enterprise OAuth AS) | HTTP | Self-service OAuth (`/connect` → login) | ragchat / elicitation hosts; per-user vaults via `X-Chat-*` |
+| **D** (needs Enterprise OAuth AS, opt-in) | HTTP | Claude client OAuth (PRM + Bearer on `/mcp`) | Claude.ai web + Desktop **custom connectors** |
 
-**Prerequisites:** Node.js **≥ 20**, a Qobrix tenant URL, and API credentials (Modes A/B) or SharpSir’s **Enterprise OAuth** bundle (Mode C).
+**Prerequisites:** Node.js **≥ 20**, a Qobrix tenant URL, and API credentials (Modes A/B) or SharpSir’s **Enterprise OAuth** bundle (Modes C/D).
 
 ```bash
 git clone https://github.com/sharpsir-group/qobrix-crm-mcp.git
@@ -26,9 +27,10 @@ npm run build
 
 ## Which mode do I want?
 
-- **Mode A** — Cursor / Claude Desktop for yourself with one service account.
+- **Mode A** — Cursor / Claude Desktop **local** (stdio) for yourself with one service account.
 - **Mode B** — a trusted backend already holds Qobrix keys and can send them as headers on every `/mcp` call.
-- **Mode C** — end user signs in (login + 2FA + consent) so tools run as that CRM user. Requires the proprietary **Enterprise OAuth** Authorization Server (delivered on request — [sharpsir.group](https://sharpsir.group) · [dev@sharpsir.group](mailto:dev@sharpsir.group)). The delivery package includes its own `docs/USER_GUIDE.md`. See also [Enterprise OAuth](../README.md#enterprise-oauth).
+- **Mode C** — end user signs in via `/connect` (login + 2FA + consent) so tools run as that CRM user (ragchat / elicitation). Requires the proprietary **Enterprise OAuth** Authorization Server (delivered on request — [sharpsir.group](https://sharpsir.group) · [dev@sharpsir.group](mailto:dev@sharpsir.group)). Keep `/mcp` on localhost.
+- **Mode D** — Claude.ai web / Desktop **remote custom connector** (paste HTTPS `/mcp` URL → Connect). Same Enterprise OAuth AS as Mode C, but Claude drives client OAuth (PRM + Bearer). Does **not** replace Mode C — run a separate process with `QOBRIX_MCP_AUTH=oauth-claude`.
 
 ---
 
@@ -231,6 +233,71 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3502/mcp \
 ```
 
 Automated smoke: `npm run test:oauth-modes`.
+
+---
+
+## Mode D — Claude.ai / Desktop custom connector (opt-in)
+
+Mode D is **additive**. It does not change Mode A/B/C behavior. Claude requires a `401` + `WWW-Authenticate` on the first unauthenticated `/mcp` call; Mode C intentionally returns `200` + a `/connect` URL there for ragchat — so Claude support lives in a separate auth mode.
+
+### 1. Configure a dedicated Mode D process
+
+```bash
+export QOBRIX_MCP_TRANSPORT=http
+export QOBRIX_MCP_AUTH=oauth-claude          # or claude / d
+export QOBRIX_MCP_HOST=0.0.0.0
+export QOBRIX_MCP_PORT=3502
+export QOBRIX_MCP_ALLOWED_HOSTS=qobrix-mcp.example.com
+export QOBRIX_MCP_PUBLIC_URL=https://qobrix-mcp.example.com
+export QOBRIX_MCP_RESOURCE_URL=https://qobrix-mcp.example.com/mcp
+export QOBRIX_OAUTH_ISSUER=https://qobrix-oauth.example.com
+export QOBRIX_OAUTH_INTROSPECTION_SECRET=<same-secret-as-Mode-C-AS>
+npm start
+```
+
+Pair with the same Enterprise OAuth AS used for Mode C (`QOBRIX_MCP_RESOURCE_URL` on the AS must match this Mode D resource URL exactly, including `/mcp`).
+
+### 2. AS redirect allowlist (when enabled)
+
+```bash
+export QOBRIX_OAUTH_REDIRECT_ALLOWLIST=https://claude.ai/api/mcp/auth_callback,http://127.0.0.1,http://localhost
+```
+
+Empty allowlist = allow all (default; Mode C local pairings keep working).
+
+### 3. Publish HTTPS `/mcp` + PRM
+
+| Path | Role | Public? |
+|------|------|---------|
+| `POST/GET/DELETE /mcp` | Streamable HTTP MCP (Bearer required) | **Yes** (Claude must reach it) |
+| `GET /.well-known/oauth-protected-resource` | RFC 9728 PRM → AS issuer | **Yes** |
+| `GET /health` | Liveness | Prefer private |
+
+**Use a subdomain** for the Mode D MCP (e.g. `https://qobrix-mcp.example.com/mcp`). Path-prefix mounts (`https://host/prefix/mcp`) are **not supported for Mode D** in this release — reverse-proxy prefix stripping often breaks RFC 9728 well-known discovery. Mode C path mounts remain fine for `/connect` + `/oauth/callback`.
+
+Allowlist Anthropic egress `160.79.104.0/21` if the MCP/AS sit behind a WAF. See [Claude connector authentication](https://claude.com/docs/connectors/building/authentication).
+
+### 4. Connect in Claude
+
+1. Claude.ai or Claude Desktop → **Settings → Connectors → Add custom connector**
+2. Paste `https://qobrix-mcp.example.com/mcp`
+3. Click **Connect** → complete Qobrix login + 2FA + consent on the Enterprise OAuth AS
+4. Tools appear under the connector; Claude refreshes tokens on `401`
+
+### 5. Verify
+
+```bash
+# Unauthenticated → 401 + WWW-Authenticate resource_metadata
+curl -si -X POST https://qobrix-mcp.example.com/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' \
+  | head -20
+
+# PRM document
+curl -s https://qobrix-mcp.example.com/.well-known/oauth-protected-resource | jq .
+```
+
+Mode C’s guidance above (**deny public `/mcp`** for ragchat) remains correct for Mode C processes — do not apply Mode D’s public `/mcp` topology to a Mode C instance.
 
 ---
 

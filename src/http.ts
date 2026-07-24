@@ -6,6 +6,9 @@
  *   qobrix-crm-mcp-oauth. /mcp is reachable without a bearer; tools surface
  *   a /connect URL (elicitation -32042 or tool-result text) when the session
  *   vault is empty. After browser login, /oauth/callback stores Qobrix creds.
+ * Mode D (QOBRIX_MCP_AUTH=oauth-claude): Claude.ai / Desktop remote connector.
+ *   RFC 9728 PRM + 401 WWW-Authenticate + Bearer introspection on /mcp.
+ *   Modes A/B/C branches below are intentionally untouched.
  */
 
 import { randomUUID } from "node:crypto";
@@ -15,11 +18,19 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { OAuthTokenVerifier } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { createServer } from "./server.js";
 import { disableEnvFallback } from "./client.js";
 import { runWithAuthAsync, type AuthCredentials } from "./auth-context.js";
 import { resolveAuthMode, modeDescription } from "./modes.js";
-import { requireOAuthEnv } from "./oauth-rs.js";
+import {
+  buildProtectedResourceMetadata,
+  createCompanionTokenVerifier,
+  credentialsFromAuthInfo,
+  fetchAuthorizationServerMetadata,
+  requireOAuthEnv,
+  wwwAuthenticateChallenge,
+} from "./oauth-rs.js";
 import { runWithRequestContext } from "./request-context.js";
 import {
   authorizeRedirect,
@@ -106,11 +117,19 @@ export async function startHttpServer(): Promise<void> {
     });
   });
 
-  // Modes B/C are strictly per-request (or session vault): never fall back to
+  // Modes B/C/D are strictly per-request (or session vault): never fall back to
   // a shared env account inside tool handlers.
-  if (authMode === "oauth" || authMode === "headers") {
+  if (
+    authMode === "oauth" ||
+    authMode === "headers" ||
+    authMode === "oauth-claude"
+  ) {
     disableEnvFallback();
   }
+
+  /** Mode D only — bearer verifier wired after AS metadata fetch. */
+  let modeDVerifier: OAuthTokenVerifier | undefined;
+  let modeDResourceUrl: URL | undefined;
 
   if (authMode === "env" && !isLoopbackHost(host)) {
     process.stderr.write(
@@ -201,6 +220,62 @@ export async function startHttpServer(): Promise<void> {
     });
   }
 
+  // Mode D — Claude.ai / Desktop remote connector (opt-in; does not alter Mode C).
+  if (authMode === "oauth-claude") {
+    const { issuer, resourceServerUrl, introspectionSecret } = requireOAuthEnv();
+    modeDResourceUrl = resourceServerUrl;
+    const prm = buildProtectedResourceMetadata({
+      resourceServerUrl,
+      issuer,
+    });
+
+    const servePrm = (_req: Request, res: Response) => {
+      res.setHeader("Cache-Control", "no-store");
+      res.json(prm);
+    };
+    // RFC 9728 well-known + Claude path-aware probe fallback.
+    app.get("/.well-known/oauth-protected-resource", servePrm);
+    app.get("/.well-known/oauth-protected-resource/mcp", servePrm);
+    const resourcePath = resourceServerUrl.pathname.replace(/\/+$/, "");
+    if (resourcePath && resourcePath !== "/" && resourcePath !== "/mcp") {
+      app.get(
+        `/.well-known/oauth-protected-resource${resourcePath}`,
+        servePrm
+      );
+    }
+
+    try {
+      const meta = await fetchAuthorizationServerMetadata(issuer);
+      const introspectionEndpoint =
+        meta.introspection_endpoint ||
+        new URL("/introspect", issuer).href;
+      modeDVerifier = createCompanionTokenVerifier({
+        issuer,
+        resourceServerUrl,
+        introspectionEndpoint,
+        introspectionSecret,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `[qobrix-crm-mcp] Mode D AS metadata deferred (will fail Bearer until AS is up): ${msg}\n`
+      );
+      // Still construct verifier with /introspect default so late AS comes online.
+      modeDVerifier = createCompanionTokenVerifier({
+        issuer,
+        resourceServerUrl,
+        introspectionEndpoint: new URL("/introspect", issuer).href,
+        introspectionSecret,
+      });
+    }
+
+    if (!isLoopbackHost(host) && !process.env.QOBRIX_MCP_ALLOWED_HOSTS) {
+      process.stderr.write(
+        "[qobrix-crm-mcp] Mode D: publish HTTPS /mcp + PRM for Claude.ai custom connectors. Set QOBRIX_MCP_ALLOWED_HOSTS to your public hostname(s). Allowlist Anthropic egress 160.79.104.0/21 if WAF'd.\n"
+      );
+    }
+  }
+
   const transports = new Map<string, StreamableHTTPServerTransport>();
   /** Keep McpServer refs for request-context (elicitation capabilities). */
   const servers = new WeakMap<StreamableHTTPServerTransport, McpServer>();
@@ -258,6 +333,75 @@ export async function startHttpServer(): Promise<void> {
         }
       );
     };
+
+    // Mode D — Claude remote connector: require Bearer; never fall into Mode C.
+    if (authMode === "oauth-claude") {
+      const resourceUrl = modeDResourceUrl;
+      const verifier = modeDVerifier;
+      if (!resourceUrl || !verifier) {
+        res.status(503).json({
+          error: "temporarily_unavailable",
+          error_description: "Mode D OAuth Resource Server is not ready",
+        });
+        return;
+      }
+
+      const authHeader = String(req.headers.authorization || "");
+      if (!authHeader.startsWith("Bearer ")) {
+        res.setHeader(
+          "WWW-Authenticate",
+          wwwAuthenticateChallenge(resourceUrl)
+        );
+        res.status(401).json({
+          error: "unauthorized",
+          error_description:
+            "Mode D requires Authorization: Bearer <access_token> (Claude.ai custom connector OAuth)",
+        });
+        return;
+      }
+
+      const token = authHeader.slice("Bearer ".length).trim();
+      if (!token) {
+        res.setHeader(
+          "WWW-Authenticate",
+          wwwAuthenticateChallenge(resourceUrl)
+        );
+        res.status(401).json({
+          error: "invalid_token",
+          error_description: "Empty bearer token",
+        });
+        return;
+      }
+
+      try {
+        const authInfo = await verifier.verifyAccessToken(token);
+        const creds = credentialsFromAuthInfo(authInfo);
+        if (!creds) {
+          res.setHeader(
+            "WWW-Authenticate",
+            wwwAuthenticateChallenge(resourceUrl)
+          );
+          res.status(401).json({
+            error: "invalid_token",
+            error_description:
+              "Token introspection did not return Qobrix credentials",
+          });
+          return;
+        }
+        await runWithAuthAsync(creds, () => run());
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.setHeader(
+          "WWW-Authenticate",
+          wwwAuthenticateChallenge(resourceUrl)
+        );
+        res.status(401).json({
+          error: "invalid_token",
+          error_description: msg,
+        });
+      }
+      return;
+    }
 
     if (authMode === "oauth") {
       const { vaultKey, reason } = resolveVaultKeyFromHeaders({
@@ -336,6 +480,22 @@ export async function startHttpServer(): Promise<void> {
           );
           process.stderr.write(
             `[qobrix-crm-mcp] Connect URL base: ${process.env.QOBRIX_MCP_PUBLIC_URL || `http://${host}:${port}`}/connect\n`
+          );
+        } catch {
+          /* already validated above */
+        }
+      }
+      if (authMode === "oauth-claude") {
+        try {
+          const { resourceServerUrl, issuer } = requireOAuthEnv();
+          process.stderr.write(
+            `[qobrix-crm-mcp] Mode D resource: ${resourceServerUrl.href}\n`
+          );
+          process.stderr.write(
+            `[qobrix-crm-mcp] Mode D AS issuer: ${issuer.href.replace(/\/+$/, "")}\n`
+          );
+          process.stderr.write(
+            `[qobrix-crm-mcp] Mode D PRM: ${resourceServerUrl.origin}/.well-known/oauth-protected-resource\n`
           );
         } catch {
           /* already validated above */

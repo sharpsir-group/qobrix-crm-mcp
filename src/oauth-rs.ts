@@ -1,16 +1,25 @@
 /**
- * Mode C — OAuth 2.1 Resource Server helpers.
+ * OAuth 2.1 Resource Server helpers (Mode C metadata + Mode D Bearer RS).
  *
  * Pairs exclusively with qobrix-crm-mcp-oauth (QOBRIX_OAUTH_ISSUER).
- * Validates bearer tokens via the companion's introspection endpoint and
- * resolves per-user Qobrix credentials into AuthInfo.extra for ALS.
+ * Mode D validates bearer tokens via the companion's introspection endpoint
+ * and resolves per-user Qobrix credentials into AuthInfo.extra for ALS.
+ * Mode C uses the same env/issuer helpers for /connect pairing.
  */
 
+import { createHash } from "node:crypto";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { OAuthMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { OAuthTokenVerifier } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { checkResourceAllowed } from "@modelcontextprotocol/sdk/shared/auth-utils.js";
 import type { AuthCredentials } from "./auth-context.js";
+
+/** Max AuthInfo entries kept after successful introspection (Mode D). */
+const INTROSPECT_CACHE_MAX = 512;
+/** Upper bound on positive-cache TTL (seconds). */
+const INTROSPECT_CACHE_MAX_TTL_SEC = 30;
+/** Safety skew so we never serve a cached entry past token expiry. */
+const INTROSPECT_CACHE_SKEW_SEC = 5;
 
 export type IntrospectionResult = {
   active: boolean;
@@ -89,6 +98,21 @@ export async function fetchAuthorizationServerMetadata(
   return meta;
 }
 
+type CachedAuthInfo = {
+  auth: AuthInfo;
+  /** Absolute ms deadline; entry is discarded at or after this time. */
+  expiresAtMs: number;
+};
+
+function tokenCacheKey(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/**
+ * Mode D Bearer verifier with a short-TTL positive cache.
+ * Avoids an /introspect round-trip (and AS rate-limit pressure) on every
+ * /mcp call. Failures and inactive tokens are never cached.
+ */
 export function createCompanionTokenVerifier(opts: {
   issuer: URL;
   resourceServerUrl: URL;
@@ -97,9 +121,45 @@ export function createCompanionTokenVerifier(opts: {
 }): OAuthTokenVerifier {
   const { issuer, resourceServerUrl, introspectionEndpoint, introspectionSecret } =
     opts;
+  const cache = new Map<string, CachedAuthInfo>();
+
+  function cacheGet(key: string): AuthInfo | undefined {
+    const hit = cache.get(key);
+    if (!hit) return undefined;
+    if (Date.now() >= hit.expiresAtMs) {
+      cache.delete(key);
+      return undefined;
+    }
+    // LRU touch
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit.auth;
+  }
+
+  function cacheSet(key: string, auth: AuthInfo): void {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const expSec = auth.expiresAt ?? nowSec + INTROSPECT_CACHE_MAX_TTL_SEC;
+    const ttlSec = Math.max(
+      1,
+      Math.min(
+        INTROSPECT_CACHE_MAX_TTL_SEC,
+        expSec - nowSec - INTROSPECT_CACHE_SKEW_SEC
+      )
+    );
+    cache.set(key, { auth, expiresAtMs: Date.now() + ttlSec * 1000 });
+    while (cache.size > INTROSPECT_CACHE_MAX) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+    }
+  }
 
   return {
     async verifyAccessToken(token: string): Promise<AuthInfo> {
+      const key = tokenCacheKey(token);
+      const cached = cacheGet(key);
+      if (cached) return cached;
+
       const response = await fetch(introspectionEndpoint, {
         method: "POST",
         headers: {
@@ -156,7 +216,7 @@ export function createCompanionTokenVerifier(opts: {
         subject: data.sub,
       };
 
-      return {
+      const auth: AuthInfo = {
         token,
         clientId: data.client_id || "unknown",
         scopes: data.scope ? data.scope.split(/\s+/).filter(Boolean) : [],
@@ -164,6 +224,8 @@ export function createCompanionTokenVerifier(opts: {
         resource: new URL(audUrl),
         extra: { qobrix: creds },
       };
+      cacheSet(key, auth);
+      return auth;
     },
   };
 }
@@ -174,4 +236,38 @@ export function credentialsFromAuthInfo(
   const q = auth?.extra?.qobrix as AuthCredentials | undefined;
   if (q?.apiUser && q?.apiKey) return q;
   return undefined;
+}
+
+/** RFC 9728 Protected Resource Metadata for Mode D (Claude connectors). */
+export function buildProtectedResourceMetadata(opts: {
+  resourceServerUrl: URL;
+  issuer: URL;
+}): Record<string, unknown> {
+  const resource = opts.resourceServerUrl.href.replace(/\/+$/, "");
+  const issuer = opts.issuer.href.replace(/\/+$/, "");
+  return {
+    resource,
+    authorization_servers: [issuer],
+    scopes_supported: ["qobrix:read"],
+    bearer_methods_supported: ["header"],
+    resource_documentation:
+      "https://github.com/sharpsir-group/qobrix-crm-mcp#enterprise-oauth",
+  };
+}
+
+/** Absolute URL of the PRM document Claude should discover. */
+export function protectedResourceMetadataUrl(resourceServerUrl: URL): string {
+  // Prefer well-known at the resource origin (RFC 9728 + Claude probing).
+  const origin = resourceServerUrl.origin;
+  const path = resourceServerUrl.pathname.replace(/\/+$/, "");
+  if (path && path !== "/" && path !== "/mcp") {
+    // Path-prefixed deploy (e.g. https://host/qobrix-mcp/mcp) → path-aware PRM.
+    return `${origin}/.well-known/oauth-protected-resource${path}`;
+  }
+  return `${origin}/.well-known/oauth-protected-resource`;
+}
+
+export function wwwAuthenticateChallenge(resourceServerUrl: URL): string {
+  const metaUrl = protectedResourceMetadataUrl(resourceServerUrl);
+  return `Bearer resource_metadata="${metaUrl}", scope="qobrix:read"`;
 }

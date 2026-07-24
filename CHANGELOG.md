@@ -7,6 +7,46 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ---
 
+## [1.7.1] - 2026-07-24
+
+### Fixed
+
+- **Mode D introspection cache**: `createCompanionTokenVerifier` now caches
+  successful introspections (sha256 token key, TTL `min(30s, exp−skew)`, LRU
+  512). Prevents AS `/introspect` 30/min storms that turned into Claude 401
+  re-auth loops under tool-call load. Failures/inactive tokens are never cached.
+- Docs: Mode D path-prefix mounts are unsupported in this release — use a
+  subdomain for public HTTPS `/mcp` + PRM.
+
+### Compatibility
+
+- Modes A/B/C unchanged. Cache is only used by Mode D Bearer verification.
+
+---
+
+## [1.7.0] - 2026-07-24
+
+### Added
+
+- **Mode D (opt-in) — Claude.ai / Desktop remote custom connector**: select with
+  `QOBRIX_MCP_AUTH=oauth-claude` (aliases `claude`, `d`). Serves RFC 9728
+  Protected Resource Metadata, returns `401` + `WWW-Authenticate:
+  Bearer resource_metadata=…` on unauthenticated `/mcp`, and validates
+  `Authorization: Bearer` via companion AS introspection.
+- PRM routes (Mode D only): `/.well-known/oauth-protected-resource` and
+  path-aware `/.well-known/oauth-protected-resource/mcp`.
+- Docs: Claude.ai connector runbook (additive); Modes A/B/C unchanged.
+
+### Compatibility
+
+- Modes A, B, and C are **byte-for-byte unchanged**. Mode C still answers
+  unauthenticated `/mcp` with **200 + `/connect` URL** (elicitation). Claude
+  requires a **401** on that same call — hence a separate opt-in mode, not a
+  patch to Mode C. Existing deployments keep working unless an operator
+  explicitly sets `QOBRIX_MCP_AUTH=oauth-claude`.
+
+---
+
 ## [1.6.1] - 2026-07-13
 
 ### Fixed
